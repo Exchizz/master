@@ -51,7 +51,6 @@ int rtp_send(RtpSession * session, mblk_t *mp, uint32_t packet_ts){
 
 int main(int argc, char *argv[])
 {
-	printf("ok 0\n");
         RtpSession *session;
         unsigned char buffer[]  = "Hello World";
         int i;
@@ -85,12 +84,10 @@ int main(int argc, char *argv[])
         signal(SIGINT,stophandler);
 
         while( (runcond) ) {
-//                rtp_session_send_with_ts(session,buffer,sizeof(buffer)-1,user_ts);
 		usleep(10000);
                 user_ts+=160;
                 if (user_ts%(160*50)==0){
 			ortp_message("sending RTCP bye");
-                   //     rtp_session_make_time_distorsion(session,clockslide);
 			mblk_t *cm;
 			mblk_t *sdes = NULL;
 			mblk_t *bye = NULL;
