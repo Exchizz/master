@@ -27,11 +27,14 @@ my $exec = "";
 my $errors = 0;
 my $executable_path = "./";
 my $data_pipe_path = "";
+my $metadata_pipe_path = "";
+my $producer_parameters = ();
 
 GetOptions(
     'verbose|v+' =>\$verbose,
     'exec|e=s' => \$exec,
     'data_pipe|dp=s' => \$data_pipe_path,
+    'metadata_pipe|mp=s' => \$metadata_pipe_path,
 ) or usage();
 
 print "Verbose: $verbose\n" if $verbose > 0;
@@ -52,45 +55,27 @@ if ($exec){
 	}
 
 }
+#========== Param. check $ARGV ========#
+#
+@{$producer_parameters} = @ARGV;
 
 #========== Create media stream FIFO =====#
-my $mode = "0600";
-# Check if pipe exists and is readable + writeable
-if(-p $data_pipe_path){
-	print "$data_pipe_path exists\n";
-} else {
-	if (mkfifo($data_pipe_path, $mode)) {
-		print "Pipe successfully created at $data_pipe_path\n" if $verbose > 0;
-	} else {
-		error("Unable to create data pipe");
-	}
-}
+create_named_pipe($data_pipe_path);
 
-
+#========= Create metadata FIFO =======#
+create_named_pipe($metadata_pipe_path);
 
 #=========== Producer start ===========#
-my @command_prod = ($executable_path.$exec, $data_pipe_path, "param2", "param3");
+my @command_prod = ($executable_path.$exec, $data_pipe_path, $metadata_pipe_path);
+
+# Add additional parameters specified to the producer
+push(@command_prod, @{$producer_parameters});
 
 my ($in_prod, $out_prod, $err_prod);
 my $h_prod = start(\@command_prod, \$in_prod, \$out_prod, \$err_prod) or die "cat: $?";
 
-my $fifo_fh;
-open($fifo_fh, "+< $data_pipe_path") or die "The FIFO file \"$fifo_fh\" is missing, and this program can't run without it.";
-my $stream = IO::Async::Stream->new(
-   read_handle  => $fifo_fh,
-   on_read => sub {
-      my ( $self, $buffref, $eof ) = @_;
-        while( $$buffref =~ s/^(.*\n)// ) {
-           print "From pipe: $1";
-        }
-      if( $eof ) {
-         print "EOF; last partial line is $$buffref\n";
-      }
-
-      return 0;
-   }
-);
-
+my $data_stream = create_pipe_stream($data_pipe_path);
+my $metadata_stream= create_pipe_stream($metadata_pipe_path);
 
 #============= MAIN ==============#
 exit_on_error(2);
@@ -101,11 +86,46 @@ periodic_timer(1, \&callback_1sec);
 
 
 print "Running main\n";
-$loop->add( $stream );
+$loop->add( $data_stream);
+$loop->add( $metadata_stream );
 $loop->run;
 #============= Routines ===========#
 
+sub create_pipe_stream {
+	my ($pipe_path,$fh) = @_;
 
+	open($fh, "+< $pipe_path") or die "The FIFO file \"$pipe_path\" is missing\n";
+	my $stream = IO::Async::Stream->new(
+	   read_handle  => $fh,
+	   on_read => sub {
+	      my ( $self, $buffref, $eof ) = @_;
+	      while( $$buffref =~ s/^(.*\n)// ) {
+	         print "From \"$pipe_path\": $1";
+	      }
+	      if( $eof ) {
+	         print "EOF; last partial line is $$buffref\n";
+	      }
+	
+	      return 0;
+	   }
+	);
+	return $stream;
+}
+
+sub create_named_pipe {
+	my ($pipe_path) = @_;
+	my $mode = "0600";
+	# Check if pipe exists and is readable + writeable
+	if(-p $pipe_path){
+		print "$pipe_path exists\n";
+	} else {
+		if (mkfifo($pipe_path, $mode)) {
+			print "Pipe successfully created at $pipe_path\n" if $verbose > 0;
+		} else {
+			error("Unable to create data pipe");
+		}
+	}
+}
 sub callback_1sec {
 	print "Tick!\n" if $verbose > 2;
 	$out_prod = "";
