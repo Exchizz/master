@@ -42,6 +42,8 @@ print "Verbose: $verbose\n" if $verbose > 0;
 #============ Param. check ===========#
 if ($exec){
 	print "Executable: $exec\n" if $verbose > 0;
+	error("\"$exec\" does not exist") unless -e $exec;
+
 	if(-r $exec){
 		print "\"$exec\" is readable\n" if $verbose > 0;
 		if(-x $exec){
@@ -86,10 +88,26 @@ periodic_timer(1, \&callback_1sec);
 
 
 print "Running main\n";
+
+register_signal_handler();
+
 $loop->add( $data_stream);
 $loop->add( $metadata_stream );
 $loop->run;
 #============= Routines ===========#
+
+sub register_signal_handler {
+	$SIG{INT}=\&sigint_handler;
+}
+
+sub sigint_handler {
+    print "Shutting down...\n";
+    print "Killing producer...\n";
+    my $retval = $h_prod->kill_kill || 2;
+    print "Producer killed gracefully\n" if $retval eq 1;
+    print "Producer killed\n" if $retval eq 0;
+    exit(0);
+}
 
 sub create_pipe_stream {
 	my ($pipe_path,$fh) = @_;
