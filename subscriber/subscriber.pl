@@ -8,7 +8,9 @@ use POSIX qw(mkfifo);
 use IPC::Run qw( start  );
 use Try::Tiny;
 use lib 'lib';
-use Net::RTCP;
+use Net::RTCP::Packet;
+use Net::RTP::Packet;
+use Net::oRTP;
 use Data::Dumper;
 
 use IO::Async::Loop;
@@ -34,8 +36,8 @@ my $data_pipe_path = "";
 my $metadata_pipe_path = "";
 my $consumer_parameters = ();
 
-my $rtcp_lport = 1338;
-my $rtcp_laddr = '127.0.0.1';
+my $rtp_lport = 1337;
+my $rtp_laddr = '127.0.0.1';
 
 
 GetOptions(
@@ -105,26 +107,57 @@ my $metadata_stream= create_pipe_stream($metadata_pipe_path);
 
 
 #=========== Connect to RTCP socket ========="
-my $rtcp = new Net::RTCP(
-	LocalPort=>$rtcp_lport,
-	LocalAddr=>$rtcp_laddr,
-) || error("Unable to connect to socket: $rtcp_lport, laddr: $rtcp_laddr");
 
-my $rtcp_handle = IO::Async::Handle->new(
-   read_handle => $rtcp,
-   on_read_ready  => sub {
-	print Dumper @_;
-	print "data...\n";
-   },
+# Create a receive object
+my $rtp_session = new Net::oRTP('RECVONLY');
+
+# Set it up
+$rtp_session->set_blocking_mode( 0 );
+$rtp_session->set_local_addr( $rtp_laddr, $rtp_lport );
+$rtp_session->set_recv_payload_type( 0 );
+
+open(my $fh, "<&=", $rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
+$fh->blocking(0);
+
+my $rtp_handler = IO::Async::Stream->new(
+    read_handle  => $fh,
+    on_read => sub {
+	my ( $self, $buffref, $eof ) = @_;
+	my $packet = new Net::RTP::Packet($$buffref);
+	print Dumper $packet;
+	undef $$buffref;
+
+	if( $eof ) {
+	   print "EOF; last partial line is $$buffref\n";
+	}
+	
+	return 0;
+    }
 );
+
+open(my $fh1, "<&=", $rtp_session->get_rtcp_fd()) or die "Can't open RTCP file descripter. $!";
+$fh->blocking(0);
+
+my $rtcp_handler = IO::Async::Stream->new(
+    read_handle  => $fh1,
+    on_read => sub {
+	my ( $self, $buffref, $eof ) = @_;
+	my $packet = new Net::RTCP::Packet($$buffref);
+	print Dumper $packet;
+	undef $$buffref;
+
+	if( $eof ) {
+	   print "EOF; last partial line is $$buffref\n";
+	}
+	
+	return 0;
+    }
+);
+
 #============= MAIN ==============#
 exit_on_error(2);
 
 my $loop = IO::Async::Loop->new;
-
-#periodic_timer(1, \&callback_1sec);
-
-
 print "Running main\n";
 
 register_signal_handler();
@@ -132,7 +165,8 @@ register_signal_handler();
 $loop->add( $process );
 $loop->add( $data_stream);
 $loop->add( $metadata_stream );
-$loop->add( $rtcp_handle );
+$loop->add( $rtp_handler );
+$loop->add( $rtcp_handler );
 $loop->run;
 #============= Routines ===========#
 
