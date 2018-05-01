@@ -2,17 +2,20 @@
 use warnings;
 use strict;
 
+use lib 'lib';
+use PubSub::Util;
+
 use Pod::Usage;
 use Getopt::Long qw( :config auto_version auto_help no_ignore_case bundling);
-use POSIX qw(mkfifo);
 use IPC::Run qw( start  );
+use Net::oRTP;
 use Try::Tiny;
-
 
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use IO::Async::Stream;
 
+use Data::Dumper;
 # Test node
 #
 # Author:     Mathias Neerup
@@ -22,13 +25,18 @@ use IO::Async::Stream;
 
 $::VERSION = "0.1";
 
-my $verbose = 0;
+our $verbose = 0;
 my $exec = "";
 my $errors = 0;
-my $executable_path = "./";
-my $data_pipe_path = "";
-my $metadata_pipe_path = "";
+my $executable_path = undef;
+my $data_pipe_path = undef;
+my $metadata_pipe_path = undef;
 my $producer_parameters = ();
+
+#================ Defaults ==============#
+my @def_metadata_pipe_path = ($ENV{'METADATA_PIPE_PATH'}, "/tmp/pipe_publisher_metadata");
+my @def_data_pipe_path = ($ENV{'DATA_PIPE_PATH'}, "/tmp/pipe_publisher_data");
+my @def_executable_path = ($ENV{'PRODUCER_EXECUTABLE'}, "./producer.sh");
 
 GetOptions(
     'verbose|v+' =>\$verbose,
@@ -39,10 +47,11 @@ GetOptions(
 
 print "Verbose: $verbose\n" if $verbose > 0;
 
+
 #============ Param. check ===========#
 if ($exec){
 	print "Executable: $exec\n" if $verbose > 0;
-	error("\"$exec\" does not exist") unless -e $exec;
+	PubSub::Util::error("\"$exec\" does not exist") unless -e $exec;
 
 	if(-r $exec){
 		print "\"$exec\" is readable\n" if $verbose > 0;
@@ -57,15 +66,33 @@ if ($exec){
 	}
 
 }
+
+# Porpulate variables with values in order Parameter, environment, default
+print Dumper PubSub::Util::apply_defaults($metadata_pipe_path, @def_metadata_pipe_path);
+$metadata_pipe_path = PubSub::Util::apply_defaults($metadata_pipe_path, @def_metadata_pipe_path);
+$data_pipe_path = PubSub::Util::apply_defaults($data_pipe_path, @def_data_pipe_path);
+$executable_path = PubSub::Util::apply_defaults($executable_path, @def_executable_path);
+
+print "Data pipe: ". $data_pipe_path." metadata pipe:".$metadata_pipe_path."\n";
+
 #========== Param. check $ARGV ========#
 #
 @{$producer_parameters} = @ARGV;
 
+#========= Create RTP session =========#
+# Create a send/receive object
+my $rtp_session = new Net::oRTP('SENDONLY');
+
+# Set it up
+$rtp_session->set_blocking_mode( 0 );
+$rtp_session->set_remote_addr( '127.0.0.1', 1337 );
+$rtp_session->set_send_payload_type( 0 );
+
 #========== Create media stream FIFO =====#
-create_named_pipe($data_pipe_path);
+PubSub::Util::create_named_pipe($data_pipe_path);
 
 #========= Create metadata FIFO =======#
-create_named_pipe($metadata_pipe_path);
+PubSub::Util::create_named_pipe($metadata_pipe_path);
 
 #=========== Producer start ===========#
 my @command_prod = ($executable_path.$exec, $data_pipe_path, $metadata_pipe_path);
@@ -74,17 +101,41 @@ my @command_prod = ($executable_path.$exec, $data_pipe_path, $metadata_pipe_path
 push(@command_prod, @{$producer_parameters});
 
 my ($in_prod, $out_prod, $err_prod);
-my $h_prod = start(\@command_prod, \$in_prod, \$out_prod, \$err_prod) or die "cat: $?";
+my $h_prod = start(\@command_prod, \$in_prod, \$out_prod, \$err_prod) or error("Unable to start producer");
 
-my $data_stream = create_pipe_stream($data_pipe_path);
-my $metadata_stream= create_pipe_stream($metadata_pipe_path);
+my $callback_data = sub {
+	my ( $self, $buffref, $eof ) = @_;
+	print "sends RAW RTP packet\n" if $verbose > 1;
+	$rtp_session->raw_rtp_send(123456, $$buffref);
+	undef $$buffref;
+#	while( $$buffref =~ s/^(.*\n)// ) {
+#	   print "From : $1";
+#	}
+	if( $eof ) {
+	   print "EOF; last partial line is $$buffref\n";
+	}
+	return 0;
+};
+
+my $callback_metadata = sub {
+	my ( $self, $buffref, $eof ) = @_;
+	while( $$buffref =~ s/^(.*\n)// ) {
+	   print "[ Producer (metadata)]: $1";
+	}
+	if( $eof ) {
+	   print "EOF; last partial line is $$buffref\n";
+	}
+	return 0;
+};
+my $data_stream = PubSub::Util::create_pipe_stream($data_pipe_path, $callback_data);
+my $metadata_stream= PubSub::Util::create_pipe_stream($metadata_pipe_path, $callback_metadata);
 
 #============= MAIN ==============#
-exit_on_error(2);
+PubSub::Util::exit_on_error(2);
 
-my $loop = IO::Async::Loop->new;
+our $loop = IO::Async::Loop->new;
 
-periodic_timer(1, \&callback_1sec);
+PubSub::Util::periodic_timer(1, \&callback_1sec);
 
 
 print "Running main\n";
@@ -95,6 +146,17 @@ $loop->add( $data_stream);
 $loop->add( $metadata_stream );
 $loop->run;
 #============= Routines ===========#
+sub callback_1sec {
+	print "Tick!\n" if $main::verbose > 2;
+	$out_prod = "";
+	$h_prod->pump_nb;
+	return unless $out_prod;
+#	chomp $out_prod;
+	my @lines =  split(/\n/,$out_prod);
+	print "[ Producer (stdout) ]: $_\n" for @lines;
+}
+
+
 
 sub register_signal_handler {
 	$SIG{INT}=\&sigint_handler;
@@ -106,90 +168,10 @@ sub sigint_handler {
     my $retval = $h_prod->kill_kill || 2;
     print "Producer killed gracefully\n" if $retval eq 1;
     print "Producer killed\n" if $retval eq 0;
+    print "Deleting pipes\n";
+    unlink $data_pipe_path if -p $data_pipe_path;
+    unlink $metadata_pipe_path if -p $metadata_pipe_path;
     exit(0);
-}
-
-sub create_pipe_stream {
-	my ($pipe_path,$fh) = @_;
-
-	open($fh, "+< $pipe_path") or die "The FIFO file \"$pipe_path\" is missing\n";
-	my $stream = IO::Async::Stream->new(
-	   read_handle  => $fh,
-	   on_read => sub {
-	      my ( $self, $buffref, $eof ) = @_;
-	      while( $$buffref =~ s/^(.*\n)// ) {
-	         print "From \"$pipe_path\": $1";
-	      }
-	      if( $eof ) {
-	         print "EOF; last partial line is $$buffref\n";
-	      }
-	
-	      return 0;
-	   }
-	);
-	return $stream;
-}
-
-sub create_named_pipe {
-	my ($pipe_path) = @_;
-	my $mode = "0600";
-	# Check if pipe exists and is readable + writeable
-	if(-p $pipe_path){
-		print "$pipe_path exists\n";
-	} else {
-		if (mkfifo($pipe_path, $mode)) {
-			print "Pipe successfully created at $pipe_path\n" if $verbose > 0;
-		} else {
-			error("Unable to create data pipe");
-		}
-	}
-}
-sub callback_1sec {
-	print "Tick!\n" if $verbose > 2;
-	$out_prod = "";
-	$h_prod->pump_nb;
-	return unless $out_prod;
-#	chomp $out_prod;
-	my @lines =  split(/\n/,$out_prod);
-	print "[ Producer ]: $_\n" for @lines;
-}
-
-
-sub periodic_timer {
-	my ($interval, $callback) = @_;
-	my $timer = IO::Async::Timer::Periodic->new(
-	   interval => $interval,
-	   on_tick => $callback,
-	);
-	$timer->start;
-	$loop->add( $timer );
-}
-
-sub error {
-    local $| = 1;
-    my $msg = join( '', @_ );
-
-    $msg .= ": $!\n" if ( $msg !~ m/\n/m and $! );
-
-    print STDERR $msg if ( $verbose >= 0 );
-    $errors++;
-}
-sub exit_on_error {
-    my $with_usage = $_[1];
-
-    if ($errors) {
-        if ($with_usage) {
-            pod2usage(
-                -exitval => $_[0],
-                -verbose => ( $verbose > 2 ? 2 : $verbose ),
-                -output  => \*STDERR
-            );
-        }
-        else {
-            print STDERR "Exiting $$ due to errors\n";
-        }
-        exit $_[0];
-    }
 }
 
 sub usage {
