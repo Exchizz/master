@@ -101,7 +101,7 @@ my $process = IO::Async::Process->new(
       on_read => sub {
          my ( $stream, $buffref ) = @_;
          while( $$buffref =~ s/^(.*)\n// ) {
-            print "consumer: '$1'\n";
+            print "[ Consumer (stdout)]: '$1'\n";
          }
 
          return 0;
@@ -128,7 +128,7 @@ my $rtp_session = new Net::oRTP('RECVONLY');
 
 # Set it up
 $rtp_session->set_blocking_mode( 0 );
-$rtp_session->set_local_addr( $rtp_laddr, $rtp_lport );
+$rtp_session->set_local_addr( "ff15::5", 1337, 1338);
 $rtp_session->set_recv_payload_type( 0 );
 
 open(my $fh, "<&=", $rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
@@ -139,8 +139,11 @@ my $rtp_handler = IO::Async::Stream->new(
     on_read => sub {
 	my ( $self, $buffref, $eof ) = @_;
 	my $packet = new Net::RTP::Packet($$buffref);
-	print "[ Producer ]: ".$packet->{payload}."\n";
-	print $data_pipe_fh $packet->{'payload'};
+	my $payload = $packet->{'payload'};
+	print Dumper $payload;
+	$payload = $payload =~ s/\n*$//r;
+	print "[ Producer ]: ".$payload."\n";
+	print $data_pipe_fh $packet->{payload};
 	undef $$buffref;
 
 	if( $eof ) {

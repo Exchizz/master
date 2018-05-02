@@ -85,7 +85,9 @@ my $rtp_session = new Net::oRTP('SENDONLY');
 
 # Set it up
 $rtp_session->set_blocking_mode( 0 );
-$rtp_session->set_remote_addr( '127.0.0.1', 1337 );
+$rtp_session->set_remote_addr( 'ff15::5', 1337, 1338);
+$rtp_session->set_multicast_ttl(10);
+$rtp_session->set_multicast_loopback(1);
 $rtp_session->set_send_payload_type( 0 );
 
 #========== Create media stream FIFO =====#
