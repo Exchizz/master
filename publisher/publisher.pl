@@ -11,6 +11,7 @@ use IPC::Run qw( start  );
 use Net::oRTP;
 use Try::Tiny;
 
+use Net::SDP;
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use IO::Async::Stream;
@@ -25,13 +26,22 @@ use Data::Dumper;
 
 $::VERSION = "0.1";
 
+use Data::GUID;
+my $guid = Data::GUID->new;
 our $verbose = 0;
 my $exec = "";
 my $errors = 0;
 my $executable_path = undef;
 my $data_pipe_path = undef;
 my $metadata_pipe_path = undef;
+my $pub_uuid = substr($guid->as_string, 0, 13);
 my $producer_parameters = ();
+
+my $multicast_addr = "ff15::5";
+
+my $wellknown_address = "ff15::beef";
+
+my @stream_descriptions = ();
 
 #================ Defaults ==============#
 my @def_metadata_pipe_path = ($ENV{'METADATA_PIPE_PATH'}, "/tmp/pipe_publisher_metadata");
@@ -66,9 +76,7 @@ if ($exec){
 	}
 
 }
-
 # Porpulate variables with values in order Parameter, environment, default
-print Dumper PubSub::Util::apply_defaults($metadata_pipe_path, @def_metadata_pipe_path);
 $metadata_pipe_path = PubSub::Util::apply_defaults($metadata_pipe_path, @def_metadata_pipe_path);
 $data_pipe_path = PubSub::Util::apply_defaults($data_pipe_path, @def_data_pipe_path);
 $executable_path = PubSub::Util::apply_defaults($executable_path, @def_executable_path);
@@ -85,10 +93,53 @@ my $rtp_session = new Net::oRTP('SENDONLY');
 
 # Set it up
 $rtp_session->set_blocking_mode( 0 );
-$rtp_session->set_remote_addr( 'ff15::5', 1337, 1338);
+$rtp_session->set_remote_addr( $multicast_addr, 1337, 1338);
 $rtp_session->set_multicast_ttl(10);
 $rtp_session->set_multicast_loopback(1);
 $rtp_session->set_send_payload_type( 0 );
+
+# Create RTP session for Well-known RTP session
+my $wk_rtp_session = new Net::oRTP('SENDONLY');
+
+$wk_rtp_session->set_blocking_mode( 0 );
+$wk_rtp_session->set_remote_addr( $wellknown_address, 5004, 5005);
+$wk_rtp_session->set_multicast_ttl(10);
+$wk_rtp_session->set_multicast_loopback(1);
+$wk_rtp_session->set_send_payload_type( 0 );
+
+#===== Create session description =====#
+
+my $example_sdp = Net::SDP->new();
+
+if(!-r 'example_session.sdp') {
+	print "Example session does not exists\n";
+}
+#$example_sdp->parse_file( 'example_session.sdp' );
+$example_sdp->session_name("My Session");
+$example_sdp->session_info("A fun session");
+$example_sdp->session_uri("http://www.ecs.soton.ac.uk/fun/");
+$example_sdp->session_attribute('tool', "publisher.pl uuid: $pub_uuid");
+ 
+ 
+# Add a Time Description
+my $time = $example_sdp->new_time_desc();
+$time->start_time_unix( time() );            # Set start time to now
+$time->end_time_unix( time()+3600 ); # Finishes in one hour
+ 
+ 
+# Add an Audio Media Description
+my $audio = $example_sdp->new_media_desc( 'audio' );
+$audio->address($multicast_addr);
+$audio->address_type("IP6");
+$audio->port(5004);
+$audio->attribute('quality', 5);
+ 
+# Add payload ID 96 with 16-bit, PCM, 22kHz, Mono
+$audio->add_format( 96, 'audio/L16/220500/1' );
+ 
+# Set the default payload ID to 0
+$audio->default_format_num( 96 );
+@stream_descriptions = ( $example_sdp );
 
 #========== Create media stream FIFO =====#
 PubSub::Util::create_named_pipe($data_pipe_path);
@@ -107,7 +158,6 @@ my $h_prod = start(\@command_prod, \$in_prod, \$out_prod, \$err_prod) or error("
 
 my $callback_data = sub {
 	my ( $self, $buffref, $eof ) = @_;
-	print "sends RAW RTP packet\n" if $verbose > 1;
 	$rtp_session->raw_rtp_send(123456, $$buffref);
 	undef $$buffref;
 #	while( $$buffref =~ s/^(.*\n)// ) {
@@ -139,6 +189,9 @@ our $loop = IO::Async::Loop->new;
 
 PubSub::Util::periodic_timer(1, \&callback_1sec);
 
+# Periodically 
+PubSub::Util::periodic_timer(1, \&callback_1sec_stream_advertisement);
+
 
 print "Running main\n";
 
@@ -147,6 +200,7 @@ register_signal_handler();
 $loop->add( $data_stream);
 $loop->add( $metadata_stream );
 $loop->run;
+
 #============= Routines ===========#
 sub callback_1sec {
 	print "Tick!\n" if $main::verbose > 2;
@@ -158,7 +212,24 @@ sub callback_1sec {
 	print "[ Producer (stdout) ]: $_\n" for @lines;
 }
 
+sub callback_1sec_stream_advertisement {
+	print "Tick!\n" if $main::verbose > 2;
+	for my $stream_description (@stream_descriptions){
+		announce_stream($stream_description);
+	}
+}
 
+sub announce_stream {
+	my ($sdp) = @_;
+	# Pack into SDP
+	# Write SDP to wk_rtp_session
+	
+	# Generate SDP file
+	my $sdp_encoded = $sdp->generate();
+
+	# Send SDP encoded description to Wellknown RTP session
+	$wk_rtp_session->raw_rtp_send(123456, $sdp_encoded);
+}
 
 sub register_signal_handler {
 	$SIG{INT}=\&sigint_handler;

@@ -76,6 +76,7 @@ sub exit_on_error {
     my $with_usage = $_[1];
 
     if ($main::errors) {
+    	print "errors: $main::errors\n";
         if ($with_usage) {
             pod2usage(
                 -exitval => $_[0],

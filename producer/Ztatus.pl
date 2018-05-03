@@ -12,7 +12,7 @@ my $context = ZMQ::FFI->new();
 my $requester = $context->socket(ZMQ_REQ);
 my $port = $ARGV[1];
 print "port: $port\n";
-$requester->connect('tcp://10.10.10.46:'.$port);
+$requester->connect('tcp://192.168.10.213:'.$port);
 say "connected!";
 #send1("Zstatus");
 send1($ARGV[0]);
