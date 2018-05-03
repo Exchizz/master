@@ -78,8 +78,9 @@ my $wk_rtp_handler = IO::Async::Stream->new(
 		}
 		my $mg = "";
 		print "SDP from '$tool', format: $out";
-		#print Dumper $sdp;
-#		print $sdp->generate();
+		print $sdp->generate() if $verbose > 0;
+		print "-"x100;
+		print "\n";
 		return 0;
 	}
 );
