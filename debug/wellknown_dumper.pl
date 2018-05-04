@@ -76,7 +76,6 @@ my $wk_rtp_handler = IO::Async::Stream->new(
 			$out.= $media->default_format().", ";
 			$out.= "Multicast: ". $media->address().":".$media->port()."\n";
 		}
-		my $mg = "";
 		print "SDP from '$tool', format: $out";
 		print $sdp->generate() if $verbose > 0;
 		print "-"x100;

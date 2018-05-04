@@ -10,6 +10,7 @@ use POSIX qw(mkfifo);
 use IPC::Run qw( start  );
 use Try::Tiny;
 use lib 'lib';
+use Net::SDP;
 use Net::RTCP::Packet;
 use Net::RTP::Packet;
 use Net::oRTP;
@@ -38,8 +39,11 @@ my $data_pipe_path = undef;
 my $metadata_pipe_path = undef;
 my $consumer_parameters = ();
 
-my $rtp_lport = 1337;
-my $rtp_laddr = '127.0.0.1';
+my $wellknown_address = "ff15::beef";
+
+# Internally used objects
+my %joinedMulticastGroups = ();
+my $loop = IO::Async::Loop->new;
 
 #================ Defaults ==============#
 my @def_metadata_pipe_path = ($ENV{'METADATA_PIPE_PATH'}, "/tmp/pipe_subscriber_metadata");
@@ -124,26 +128,37 @@ $data_pipe_fh->autoflush(1);
 #=========== Connect to RTCP socket ========="
 
 # Create a receive object
-my $rtp_session = new Net::oRTP('RECVONLY');
+my $wk_rtp_session = new Net::oRTP('RECVONLY');
 
 # Set it up
-$rtp_session->set_blocking_mode( 0 );
-$rtp_session->set_local_addr( "ff15::5", 1337, 1338);
-$rtp_session->set_recv_payload_type( 0 );
+$wk_rtp_session->set_blocking_mode( 0 );
+$wk_rtp_session->set_local_addr( $wellknown_address, 5004, 5005);
+$wk_rtp_session->set_recv_payload_type( 0 );
 
-open(my $fh, "<&=", $rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
-$fh->blocking(0);
+open(my $fh, "<&=", $wk_rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
 
-my $rtp_handler = IO::Async::Stream->new(
+my $wk_rtp_handler = IO::Async::Stream->new(
     read_handle  => $fh,
     on_read => sub {
 	my ( $self, $buffref, $eof ) = @_;
+
 	my $packet = new Net::RTP::Packet($$buffref);
 	my $payload = $packet->{'payload'};
-	print Dumper $payload;
-	$payload = $payload =~ s/\n*$//r;
-	print "[ Producer ]: ".$payload."\n";
-	print $data_pipe_fh $packet->{payload};
+
+	my $sdp = Net::SDP->new($payload);
+	my $tool = $sdp->session_attribute( 'tool' );
+	my $out = "";
+	my $media_list = $sdp->media_desc_arrayref();
+	for my $media (@$media_list){
+		$out.= $media->default_format().", ";
+		$out.= "Multicast: ". $media->address().":".$media->port()."\n";
+	}
+	print "SDP from '$tool', format: $out";
+	if(1){
+		join_stream($sdp);
+	}
+	print $sdp->generate() if $verbose > 0;
+
 	undef $$buffref;
 
 	if( $eof ) {
@@ -154,10 +169,54 @@ my $rtp_handler = IO::Async::Stream->new(
     }
 );
 
-open(my $fh1, "<&=", $rtp_session->get_rtcp_fd()) or die "Can't open RTCP file descripter. $!";
-$fh->blocking(0);
+sub join_stream {
+	my ($sdp) = @_;
+	my $media_list = $sdp->media_desc_arrayref();
+	for my $media (@$media_list){
+		my $multicastaddress = $media->address;
+		my $multicastport = $media->port;
+		if(exists $joinedMulticastGroups{"$multicastaddress:$multicastport"}) {
+			print "$multicastaddress:$multicastport already in joined-list\n" if $verbose > 2;
+			next;
+		}
+	
 
-my $rtcp_handler = IO::Async::Stream->new(
+		print "Joining multicast group: $multicastaddress:$multicastport\n";
+		# Create RTP session for Well-known RTP session
+		my $rtp_session = new Net::oRTP('RECVONLY');
+		$joinedMulticastGroups{"$multicastaddress:$multicastport"} = $rtp_session;
+		
+		$rtp_session->set_blocking_mode( 0 );
+		$rtp_session->set_local_addr( $multicastaddress, $multicastport, $multicastport+1);
+		$rtp_session->set_recv_payload_type( 0 );
+		
+		print "fd:".$rtp_session->get_rtp_fd()."\n";
+		open(my $fh, "<&=", $rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
+		
+		my $rtp_handler = IO::Async::Stream->new(
+			read_handle  => $fh,
+			on_read => sub {
+				my ( $self, $buffref, $eof ) = @_;
+				my $packet = new Net::RTP::Packet($$buffref);
+				my $payload = $packet->{'payload'};
+				undef $$buffref;
+				
+				if( $eof ) {
+				   print "EOF; last partial line is $$buffref\n";
+				}
+				 
+				print "Received packet from RTP stream\n!      payload: $payload\n";
+				return 0;
+			}
+		);
+		$loop->stop( "NewRtp" );
+		$loop->add( $rtp_handler  );
+	}
+}
+
+open(my $fh1, "<&=", $wk_rtp_session->get_rtcp_fd()) or die "Can't open RTCP file descripter. $!";
+
+my $wk_rtcp_handler = IO::Async::Stream->new(
     read_handle  => $fh1,
     on_read => sub {
 	my ( $self, $buffref, $eof ) = @_;
@@ -176,7 +235,6 @@ my $rtcp_handler = IO::Async::Stream->new(
 #============= MAIN ==============#
 PubSub::Util::exit_on_error(2);
 
-my $loop = IO::Async::Loop->new;
 print "Running main\n";
 
 register_signal_handler();
@@ -184,9 +242,16 @@ register_signal_handler();
 $loop->add( $process );
 #$loop->add( $data_stream);
 #$loop->add( $metadata_stream );
-$loop->add( $rtp_handler );
-$loop->add( $rtcp_handler );
-$loop->run;
+$loop->add( $wk_rtp_handler );
+$loop->add( $wk_rtcp_handler );
+
+while(1){
+	my $retval = $loop->run;
+	print "Main-loop stopped with retval: $retval\n";
+	if($retval eq "NewRtp"){
+		print "Restarting loop due to new RTP stream joined\n";
+	}
+}
 #============= Routines ===========#
 
 sub register_signal_handler {
@@ -202,7 +267,7 @@ sub sigint_handler {
     print "Deleting pipes\n";
     unlink $data_pipe_path if -p $data_pipe_path;
     unlink $metadata_pipe_path if -p $metadata_pipe_path;
-exit(0);
+    exit(0);
 }
 
 

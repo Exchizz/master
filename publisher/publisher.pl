@@ -93,7 +93,7 @@ my $rtp_session = new Net::oRTP('SENDONLY');
 
 # Set it up
 $rtp_session->set_blocking_mode( 0 );
-$rtp_session->set_remote_addr( $multicast_addr, 1337, 1338);
+$rtp_session->set_remote_addr( $multicast_addr, 5004, 5005);
 $rtp_session->set_multicast_ttl(10);
 $rtp_session->set_multicast_loopback(1);
 $rtp_session->set_send_payload_type( 0 );
