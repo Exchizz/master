@@ -1,6 +1,7 @@
 package PubSub::Util;
 use strict;
 use warnings;
+use Fcntl qw(F_GETPIPE_SZ O_NONBLOCK  O_WRONLY F_SETPIPE_SZ O_RDONLY);
  
 use POSIX qw(mkfifo);
 
@@ -27,11 +28,21 @@ sub default {
 }
 
 sub create_pipe_stream {
-	my ($pipe_path,$callback) = @_;
+	my ($pipe_path,$callback, $readlen) = @_;
 
-	open(my $fh, "+< $pipe_path") or die "The FIFO file \"$pipe_path\" is missing\n";
+#	open(my $fh, "+< $pipe_path") or die "The FIFO file \"$pipe_path\" is missing\n";
+	sysopen(my $fh, $pipe_path, O_RDONLY | O_NONBLOCK)         or die $!;
+
+	my $pipe_sz = fcntl($fh,F_GETPIPE_SZ,0);
+	print "data pipe size: $pipe_sz\n" if $main::verbose > 0;
+
+	print "Setting pipe to $readlen\n" if $main::verbose > 0;
+	my $new = fcntl($fh, F_SETPIPE_SZ, int($readlen));
+	print "New pipe size: $new\n" if $main::verbose > 0;
+
 	my $stream = IO::Async::Stream->new(
 	   read_handle  => $fh,
+	   read_all => 1,
 	   on_read => $callback,
 	);
 	undef $fh;

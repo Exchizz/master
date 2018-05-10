@@ -39,6 +39,7 @@ my $producer_parameters = ();
 
 my $multicast_addr = "ff15::5";
 
+my $buffer_size = 4096;
 my $wellknown_address = "ff15::beef";
 
 my @stream_descriptions = ();
@@ -46,7 +47,7 @@ my @stream_descriptions = ();
 #================ Defaults ==============#
 my @def_metadata_pipe_path = ($ENV{'METADATA_PIPE_PATH'}, "/tmp/pipe_publisher_metadata");
 my @def_data_pipe_path = ($ENV{'DATA_PIPE_PATH'}, "/tmp/pipe_publisher_data");
-my @def_executable_path = ($ENV{'PRODUCER_EXECUTABLE'}, "./producer.sh");
+my @def_executable_path = ($ENV{'PRODUCER_EXECUTABLE'}, "./");
 
 GetOptions(
     'verbose|v+' =>\$verbose,
@@ -159,6 +160,7 @@ my $h_prod = start(\@command_prod, \$in_prod, \$out_prod, \$err_prod) or error("
 my $callback_data = sub {
 	my ( $self, $buffref, $eof ) = @_;
 	$rtp_session->raw_rtp_send(123456, $$buffref);
+	print "data incomming from data pipe\n" if $verbose > 1;
 	undef $$buffref;
 #	while( $$buffref =~ s/^(.*\n)// ) {
 #	   print "From : $1";
@@ -179,8 +181,8 @@ my $callback_metadata = sub {
 	}
 	return 0;
 };
-my $data_stream = PubSub::Util::create_pipe_stream($data_pipe_path, $callback_data);
-my $metadata_stream= PubSub::Util::create_pipe_stream($metadata_pipe_path, $callback_metadata);
+my $data_stream = PubSub::Util::create_pipe_stream($data_pipe_path, $callback_data, $buffer_size);
+my $metadata_stream= PubSub::Util::create_pipe_stream($metadata_pipe_path, $callback_metadata, $buffer_size);
 
 #============= MAIN ==============#
 PubSub::Util::exit_on_error(2);
