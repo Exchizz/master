@@ -112,10 +112,6 @@ $wk_rtp_session->set_send_payload_type( 0 );
 
 my $example_sdp = Net::SDP->new();
 
-if(!-r 'example_session.sdp') {
-	print "Example session does not exists\n";
-}
-#$example_sdp->parse_file( 'example_session.sdp' );
 $example_sdp->session_name("My Session");
 $example_sdp->session_info("A fun session");
 $example_sdp->session_uri("http://www.ecs.soton.ac.uk/fun/");
