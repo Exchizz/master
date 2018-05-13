@@ -1,0 +1,37 @@
+Microsoft Visual Studio Solution File, Format Version 11.00
+# Visual Studio 2010
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rtpdump", "rtpdump.vcxproj", "{3728D7FF-88D6-A3AA-EC5F-4ABC87923B48}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rtpplay", "rtpplay.vcxproj", "{D9F3E0ED-4CC9-C64A-D53A-EF3BD693298C}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rtpsend", "rtpsend.vcxproj", "{95E97737-15D4-D5F0-2CF5-193A9C3B1F36}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rtptrans", "rtptrans.vcxproj", "{D64D5AFF-2E38-C242-27E4-0F6D839223D2}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Template|Win32 = Template|Win32
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3728D7FF-88D6-A3AA-EC5F-4ABC87923B48}.Debug|Win32.ActiveCfg = Debug|Win32
+		{3728D7FF-88D6-A3AA-EC5F-4ABC87923B48}.Debug|Win32.Build.0 = Debug|Win32
+		{3728D7FF-88D6-A3AA-EC5F-4ABC87923B48}.Template|Win32.ActiveCfg = Template|Win32
+		{3728D7FF-88D6-A3AA-EC5F-4ABC87923B48}.Template|Win32.Build.0 = Template|Win32
+		{D9F3E0ED-4CC9-C64A-D53A-EF3BD693298C}.Debug|Win32.ActiveCfg = Debug|Win32
+		{D9F3E0ED-4CC9-C64A-D53A-EF3BD693298C}.Debug|Win32.Build.0 = Debug|Win32
+		{D9F3E0ED-4CC9-C64A-D53A-EF3BD693298C}.Template|Win32.ActiveCfg = Template|Win32
+		{D9F3E0ED-4CC9-C64A-D53A-EF3BD693298C}.Template|Win32.Build.0 = Template|Win32
+		{95E97737-15D4-D5F0-2CF5-193A9C3B1F36}.Debug|Win32.ActiveCfg = Debug|Win32
+		{95E97737-15D4-D5F0-2CF5-193A9C3B1F36}.Debug|Win32.Build.0 = Debug|Win32
+		{95E97737-15D4-D5F0-2CF5-193A9C3B1F36}.Template|Win32.ActiveCfg = Template|Win32
+		{95E97737-15D4-D5F0-2CF5-193A9C3B1F36}.Template|Win32.Build.0 = Template|Win32
+		{D64D5AFF-2E38-C242-27E4-0F6D839223D2}.Debug|Win32.ActiveCfg = Debug|Win32
+		{D64D5AFF-2E38-C242-27E4-0F6D839223D2}.Debug|Win32.Build.0 = Debug|Win32
+		{D64D5AFF-2E38-C242-27E4-0F6D839223D2}.Template|Win32.ActiveCfg = Template|Win32
+		{D64D5AFF-2E38-C242-27E4-0F6D839223D2}.Template|Win32.Build.0 = Template|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

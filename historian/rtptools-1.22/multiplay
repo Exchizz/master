@@ -1,0 +1,77 @@
+#!/bin/sh
+
+# (c) 1998-2018 by Columbia University; all rights reserved
+#
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+# 3. Neither the name of the University nor the names of its contributors
+#    may be used to endorse or promote products derived from this software
+#    without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+# OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+# OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+# SUCH DAMAGE.
+
+USAGE="usage: multidump [-p profile] [-T] [-v] filebase addr/port[/ttl] [...]"
+
+args=""  # The flags to pass to each rtpplay
+pids=""  # The list process IDs of the rtpplay processes
+count=1  # The count of rtpplay sessions.
+
+# Catch signals that need to be passed down to rtpplay.
+trap 'kill $pids' 1   # SIGHUP
+trap 'kill $pids' 2   # SIGINT
+trap 'kill $pids' 15  # SIGTERM
+
+# Parse the flags.  Using getopt is the easiest way to tell where the
+# options start.
+while getopts 'p:Tv' c
+do
+    case $c in
+    p)          args="${args} -$c ${OPTARG}";;
+    T | v)      args="$args -$c";;
+    \?)     echo $USAGE
+	    exit 2;;
+    esac
+done
+shift `expr $OPTIND - 1`
+
+# Make sure we have a filebase, and get it.
+if expr $# \< 1 > /dev/null
+then
+    echo $USAGE
+    exit 2;
+fi
+filebase=$1
+shift
+
+# Get each of the destination addresses, and start an rtpplay for it.
+# Its output goes to filebase.count.
+while expr $# \> 0 > /dev/null
+do
+    echo "rtpplay $args -f $filebase.$count $1 > /dev/null &"
+    rtpplay $args -f $filebase.$count $1 > /dev/null &
+    pids="$pids $!"
+    count=`expr $count + 1`
+    shift
+done
+
+# Wait for all the processes to finish.
+wait $pids
+
