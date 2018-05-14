@@ -155,15 +155,15 @@ my $h_prod = start(\@command_prod, \$in_prod, \$out_prod, \$err_prod) or error("
 
 my $callback_data = sub {
 	my ( $self, $buffref, $eof ) = @_;
+
 	$rtp_session->raw_rtp_send(123456, $$buffref);
+
 	print "data incomming from data pipe\n" if $verbose > 1;
-	undef $$buffref;
-#	while( $$buffref =~ s/^(.*\n)// ) {
-#	   print "From : $1";
-#	}
+
 	if( $eof ) {
 	   print "EOF; last partial line is $$buffref\n";
 	}
+	undef $$buffref;
 	return 0;
 };
 

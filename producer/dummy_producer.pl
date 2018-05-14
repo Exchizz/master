@@ -14,15 +14,17 @@ use ZMQ::Constants qw(:all);
 $| = 1;
 
 # Generate x kb/sek of chunksize
-my $chunksize = undef; # bytes
-my $bandwidth = undef; # bytes/sec
+my $chunksize = 4096; # bytes
+my $bandwidth = 4096; # bytes/sec
 my $timer_send;
 my $new_pipe_size = 4096;
 my $get_metadata_interval = 1; # sec
 my $numb = 0;
 my $zero_mem;
 my $sleep_s;
-my $snap = "tcp://10.10.10.46:7777";
+my $snap = "tcp://127.0.0.1:7777";
+my $snap_length = 2048; # in samples
+my $snap_count = 200;
 
 my $mode = "snapshot";
 my $verbose = 0;
@@ -35,6 +37,7 @@ GetOptions ("chunksize=i"   => \$chunksize,
 
 print "Verbose: $verbose\n" if $verbose > 0;
 
+print "mode: $mode\n";
 # ARGV[0] and 1 contains arguments not consumed by GetOptions
 my $data_pipe_path = $ARGV[0] || undef;
 my $metadata_pipe_path = $ARGV[1] || undef;
@@ -52,15 +55,6 @@ print "Initial data pipe size: $initial_size, new size: $new_size, verify size: 
 
 # Set fd to non blocking
 select((select($fh_data_pipe), $| = 1)[0]);
-
-
-#my $context = ZMQ::FFI->new();
-#
-## Socket to talk to server
-#my $requester = $context->socket(ZMQ_REQ);
-#$requester->connect('tcp://batbox3:7777');
-#
-#print "Connected to snapshot\n" if $verbose > 0;
 
 my $zmq_ctx = ZMQ::Context->new();
 
@@ -87,8 +81,8 @@ if($mode eq "snapshot"){
 	my $SNAP = zmq_setup($zmq_snapshot);
 	my $args = {};
 	$args->{start}  = 0;
-	$args->{length} = 1024;
-	$args->{count} = 1;
+	$args->{length} = $snap_length;
+	$args->{count} = $snap_count;
 	$args->{stream} = $data_pipe_path;
 	
 	# Send command to snapshot process
@@ -102,7 +96,7 @@ if($mode eq "snapshot"){
 
 if($mode eq "dummy"){
 	$zero_mem = "X" x $chunksize;	
-
+	substr($zero_mem,-1,1,'E');
 	$sleep_s = $chunksize/$bandwidth; # 1/($bandwidth/$chunksize)
 
 
@@ -152,7 +146,7 @@ sub send1{
 	# info: READER ACTIVE hix: 0x0000003882b800 [spl] tix: 0x00000037965000 [spl] now: 0x0013a1fc51c7fc [ns]
 print $info."\n";
 	my ($hix, $tix, $now_ns) = ($info =~ /READER\s*ACTIVE\s*hix:\s*(.*?)\s*\[spl\]\s*tix:\s*(.*?)\s*\[spl\]\s*now:\s*(.*?)\s*\[ns\]/);
-	my $now_s = bighex($now_ns)/(1e9);
+#	my $now_s = bighex($now_ns)/(1e9);
 #	printf "%02d:%02d:%02d\n", $now_s/3600, $now_s/60%60, $now_s%60;
 #	print "hix: $hix\n";
 #	print "tix: $tix\n";
@@ -205,7 +199,11 @@ sub callback_send_pkg {
 sub callback_get_metadata {
 	my (@args) = @_;
 	my $ztatus_rsp = send1("Ztatus", $zmq_snapshot);
-	print Dumper $ztatus_rsp;
+	my $now_ns = $ztatus_rsp->{now_ns};
+	my $now_s = $now_ns/(1e9);
+	printf "%02d:%02d:%02d\n", $now_s/3600, $now_s/60%60, $now_s%60;
+
+#	print Dumper $ztatus_rsp;
 }
 
 sub get_chunk {
@@ -213,13 +211,14 @@ sub get_chunk {
 	substr($zero_mem, 0,length($numb), $numb);
 	return $zero_mem;
 }
+
 sub bighex {
-    my $hex = shift;
+	my $hex = shift;
 
 	print "Param hex: $hex\n";
-    my $part = qr/[0-9a-fA-F]{8}/;
-    print "$hex is not a 64-bit hex number\n"
-        unless my ($high, $low) = $hex =~ /^0x($part)($part)$/;
+	my $part = qr/[0-9a-fA-F]{8}/;
+	print "$hex is not a 64-bit hex number\n"
+	  unless my ($high, $low) = $hex =~ /^0x($part)($part)$/;
 
-    return hex("0x$low") + (hex("0x$high") << 32);
+	return hex("0x$low") + (hex("0x$high") << 32);
 }
