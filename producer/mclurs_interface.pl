@@ -6,7 +6,7 @@ use ZMQ;
 use ZMQ::Constants qw(:all);
 use MCLURS::Snap;
 
-my snap = "tcp://10.10.10.46:7778";
+my $snap = "tcp://10.10.10.46:7777";
 my $zmq_ctx = ZMQ::Context->new();
 
 # Set up ZMQ socket to talk to snapshotter
@@ -23,13 +23,12 @@ my $SNAP = MCLURS::Snap->new( skt => $zmq_snapshot, timeout => 3000 );
 
 print "Probing the snapshotter\n";
 unless ( $SNAP->probe() ) {
-      print "Cannot talk to snapshotter: " . $SNAP->error()."\n";
+      print "Cannot talk to snapshotter: " . $SNAP->error()."\n"
       unless ( $SNAP->busy() );
 }
 
-print ( 0, $SNAP->error() )
-  unless ( $SNAP->setup() );     # Initialise the snapshotter
-print ( 0, $SNAP->error() ) unless ( $SNAP->start() );  # Start capture
+die($SNAP->error()) unless ( $SNAP->setup() );     # Initialise the snapshotter
+die($SNAP->error())  unless ( $SNAP->start() );  # Start capture
 
 my $args = {};
 $args->{start}  = 0;
@@ -40,7 +39,7 @@ $args->{stream} = "test/test-stream-file";
 # Send command to snapshot process
 my $snap_name = $SNAP->snap( %{$args} );
 unless ($snap_name) {
-    error( "snapshot $id snap command failed: " . $SNAP->error() . "\n" );
-    return ( 0, $SNAP->error() . "\n" );
+     "snapshot X snap command failed: " . $SNAP->error() . "\n";
+     print $SNAP->error() . "\n";
 }
 

@@ -112,10 +112,6 @@ $wk_rtp_session->set_send_payload_type( 0 );
 
 my $example_sdp = Net::SDP->new();
 
-if(!-r 'example_session.sdp') {
-	print "Example session does not exists\n";
-}
-#$example_sdp->parse_file( 'example_session.sdp' );
 $example_sdp->session_name("My Session");
 $example_sdp->session_info("A fun session");
 $example_sdp->session_uri("http://www.ecs.soton.ac.uk/fun/");
@@ -159,15 +155,15 @@ my $h_prod = start(\@command_prod, \$in_prod, \$out_prod, \$err_prod) or error("
 
 my $callback_data = sub {
 	my ( $self, $buffref, $eof ) = @_;
+
 	$rtp_session->raw_rtp_send(123456, $$buffref);
+
 	print "data incomming from data pipe\n" if $verbose > 1;
-	undef $$buffref;
-#	while( $$buffref =~ s/^(.*\n)// ) {
-#	   print "From : $1";
-#	}
+
 	if( $eof ) {
 	   print "EOF; last partial line is $$buffref\n";
 	}
+	undef $$buffref;
 	return 0;
 };
 

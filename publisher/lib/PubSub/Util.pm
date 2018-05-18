@@ -82,7 +82,7 @@ sub create_pipe_stream {
 
 	my $stream = IO::Async::Stream->new(
 	   read_handle  => $fh,
-	   read_all => 1,
+	   read_len => 4096,
 	   on_read => $callback,
 	);
 	undef $fh;
@@ -102,7 +102,7 @@ sub create_named_pipe {
 			error("Unable to create data pipe");
 		}
 	}
-	chmod 0700, $pipe_path;
+	chmod 0777, $pipe_path;
 }
 sub periodic_timer {
 	my ($interval, $callback) = @_;
