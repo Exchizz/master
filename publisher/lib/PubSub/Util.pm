@@ -13,6 +13,46 @@ sub rnd_str {
 	return $string;
 }
 
+
+# Wait for a condition to become true
+sub waitfor {
+    my ( $cond, $duration, $interval ) = @_;
+    my $elapsed = 0;
+    my $stop    = 0;
+
+    return undef unless ( defined($cond) and ref($cond) eq 'CODE' );
+    $duration ||= 5.0;          # Max waiting time in seconds, default 5s
+    $interval ||= $duration /
+      100.0;    # Interval between checks of condition, default duration/10.
+
+    debug( 3,
+        sprintf( "Waitfor: duration %f and interval %f", $duration, $interval )
+    );
+    until ( $elapsed >= $duration or $stop ) {
+        $elapsed += $interval;
+        $stop = &{$cond}();
+        sleep($interval);
+        debug( 4,
+            sprintf( "Waitfor: wake from sleep at elapsed %f", $elapsed ) );
+    }
+    debug(
+        3,
+        sprintf(
+            "Waitfor: loop completed, elapsed %f of %f",
+            $elapsed, $duration
+        )
+    );
+    return $stop;
+}
+
+sub debug {
+    local $| = 1;
+    my $lvl = shift;
+
+    print @_, "\n" if ( $lvl < $main::verbose );
+}
+
+
 sub apply_defaults {
 	my $res = undef;
 	for my $s (@_) {
