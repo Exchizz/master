@@ -12,9 +12,13 @@ use Net::oRTP;
 use Try::Tiny;
 
 use Net::SDP;
+use Net::RTP::Packet;
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use IO::Async::Stream;
+
+
+use IO::Select;
 
 use Data::Dumper;
 # Test node
@@ -22,6 +26,26 @@ use Data::Dumper;
 # Author:     Mathias Neerup
 # Created:    2018-09-04
 # Last Edit:  
+#=============== Workflow ===============
+#
+#
+#        init parameters
+#	       |
+#	       v
+#     setup wellknown address 
+#              |
+#  	       v
+#   waitfor publishers to register(10 seconds) 
+#	       |
+#              v
+# Setup RTP session for HB-data 
+#              |
+#              v
+#         run producer
+#              |
+#              v
+#	run event loop.
+#
 #=============== OPTIONS, GLOBALS, DEFAULTS ===============
 
 $::VERSION = "0.1";
@@ -36,8 +60,16 @@ my $data_pipe_path = undef;
 my $metadata_pipe_path = undef;
 my $pub_uuid = substr($guid->as_string, 0, 13);
 my $producer_parameters = ();
+my %known_occupied_groups = ();
+my $wait_for_announcements = 5; # seconds
 
-my $multicast_addr = "ff15::5";
+# Generate random ip(length 4, prepend 0)
+my $rand_ip = sprintf("%04x",int(rand(2**16)));
+
+my $scope = "ff15";
+my $multicast_addr = "${scope}::1234";
+#sprintf("%s::%s", $scope, $rand_ip);
+print "Random ip: ".$multicast_addr."\n";
 
 my $buffer_size = 4096;
 my $wellknown_address = "ff15::beef";
@@ -88,7 +120,33 @@ print "Data pipe: ". $data_pipe_path." metadata pipe:".$metadata_pipe_path."\n";
 #
 @{$producer_parameters} = @ARGV;
 
-#========= Create RTP session =========#
+
+# Create RTP session for Well-known RTP session
+my $wk_rtp_session = new Net::oRTP('SENDRECV');
+
+$wk_rtp_session->set_blocking_mode( 0 );
+$wk_rtp_session->set_remote_addr( $wellknown_address, 5004, 5005);
+$wk_rtp_session->set_multicast_ttl(10);
+$wk_rtp_session->set_multicast_loopback(1);
+$wk_rtp_session->set_send_payload_type( 0 );
+
+$wk_rtp_session->set_local_addr( $wellknown_address, 5004, 5005);
+$wk_rtp_session->set_recv_payload_type( 0 );
+
+# Open file descripter
+open(my $fh1, "<&=", $wk_rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
+
+
+while( is_ipv6_taken($fh1, $multicast_addr) ){
+	# Generate random ip(length 4, prepend 0)
+	$rand_ip = sprintf("%04x",int(rand(2**16)));
+
+	$multicast_addr = sprintf("ff15::%s",$rand_ip);
+	print "New random IPv6 multicast ip: $multicast_addr\n";
+}
+
+
+##========= Create RTP session =========#
 # Create a send/receive object
 my $rtp_session = new Net::oRTP('SENDONLY');
 
@@ -98,16 +156,6 @@ $rtp_session->set_remote_addr( $multicast_addr, 5004, 5005);
 $rtp_session->set_multicast_ttl(10);
 $rtp_session->set_multicast_loopback(1);
 $rtp_session->set_send_payload_type( 0 );
-
-# Create RTP session for Well-known RTP session
-my $wk_rtp_session = new Net::oRTP('SENDONLY');
-
-$wk_rtp_session->set_blocking_mode( 0 );
-$wk_rtp_session->set_remote_addr( $wellknown_address, 5004, 5005);
-$wk_rtp_session->set_multicast_ttl(10);
-$wk_rtp_session->set_multicast_loopback(1);
-$wk_rtp_session->set_send_payload_type( 0 );
-
 #===== Create session description =====#
 
 my $example_sdp = Net::SDP->new();
@@ -200,6 +248,49 @@ $loop->add( $metadata_stream );
 $loop->run;
 
 #============= Routines ===========#
+
+sub is_ipv6_taken {
+	my ($fh, $needle) = @_;
+
+
+	sub check_wellknown_session {
+		my ($fh, $needle) = @_;
+		print "Callback invoked...\n" if $verbose > 3;
+		my @ready = IO::Select->new($fh)->can_read(1);
+	
+		if(@ready){
+			# This works as we've only added one fh to watch..
+			my ($ready_fd) = @ready;
+			my $bytes_read = sysread($ready_fd, my $buffer,4096);
+			my $packet = new Net::RTP::Packet($buffer);
+		        my $payload = $packet->{'payload'};
+		
+		        my $sdp = Net::SDP->new($payload);
+			my $media_list = $sdp->media_desc_arrayref();
+		        for my $media (@$media_list){
+		                my $multicastaddress = $media->address;
+		                my $multicastport = $media->port;
+		
+				# We got a conflict
+				print "$multicastaddress vs. $needle\n" if $verbose >3;
+				if($multicastaddress eq $needle){
+					return 1;
+				}
+			}
+		}	
+		return 0; 
+	}
+	
+	if(PubSub::Util::waitfor( sub { check_wellknown_session($fh1, $needle) } , $wait_for_announcements, 1.0 )){
+		print "Ipv6 multicast group conflict\n";
+		return 1;
+	} else {
+		print "No IPv6 multicast conflict\n";
+		return 0;
+	}
+}
+
+
 sub callback_1sec {
 	print "Tick!\n" if $main::verbose > 2;
 	$out_prod = "";
