@@ -17,7 +17,7 @@ use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use IO::Async::Stream;
 
-
+use Storable qw(thaw); 
 use IO::Select;
 
 use Data::Dumper;
@@ -217,9 +217,13 @@ my $callback_data = sub {
 
 my $callback_metadata = sub {
 	my ( $self, $buffref, $eof ) = @_;
-	while( $$buffref =~ s/^(.*\n)// ) {
-	   print "[ Producer (metadata)]: $1";
-	}
+
+	my $data = thaw($$buffref);
+	print Dumper $data;
+	undef $$buffref;
+#	while( $$buffref =~ s/^(.*\n)// ) {
+#	   print "[ Producer (metadata)]: $1";
+#	}
 	if( $eof ) {
 	   print "EOF; last partial line is $$buffref\n";
 	}
