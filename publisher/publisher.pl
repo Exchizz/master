@@ -67,7 +67,7 @@ my $autogen_ip = 1;
 
 # Generate random ip(length 4, prepend 0)
 my $rand_ip = sprintf("%04x",int(rand(2**16)));
-
+my $nonessential = ""; 
 my $scope = "ff15";
 my $multicast_addr = "${scope}::1234";
 #sprintf("%s::%s", $scope, $rand_ip);
@@ -208,6 +208,16 @@ push(@command_prod, @{$producer_parameters});
 my ($in_prod, $out_prod, $err_prod);
 my $h_prod = start(\@command_prod, \$in_prod, \$out_prod, \$err_prod) or error("Unable to start producer");
 
+
+sub callback_5sec{
+	# Return if no nonessential data is available
+	return unless($nonessential ne "");
+
+	# Pr. custom metadata profile, set markbit to 1
+	$wk_rtp_session->raw_rtp_send(0, $nonessential, 1); 
+	print "Non-essential metadata sent to well known multicast group\n" if $verbose > 2;
+};
+
 my $callback_data = sub {
 	my ( $self, $buffref, $eof ) = @_;
 	if( $eof ) {
@@ -242,20 +252,19 @@ my $callback_metadata = sub {
 	print "Metadata format: $metadatafmt\n" if $verbose > 2;
 
 	if($metadatafmt eq "json"){
-		print "--$$buffref--\n";
 		try {
 			$data = decode_json($$buffref);
 		} catch {
-			warn "Unable to decode json metadata: $_"; # not $@
+			print "Unable to decode json metadata: $_"; # not $@
 		};
 	} elsif($metadatafmt eq "yaml") {
 		print "YAML NOT IMPLEMENTED\n";
+		undef $$buffref;
 		return 0;
 	}
 	
-	my $nonenssential = nfreeze($data->{'nonessential'});
+	$nonessential = nfreeze($data->{'nonessential'});
 
-	$wk_rtp_session->raw_rtp_send(0, $nonenssential); 
 	undef $$buffref;
 	return 0;
 };
@@ -268,6 +277,7 @@ PubSub::Util::exit_on_error(2);
 our $loop = IO::Async::Loop->new;
 
 PubSub::Util::periodic_timer(1, \&callback_1sec);
+PubSub::Util::periodic_timer(5, \&callback_5sec);
 
 # Periodically 
 PubSub::Util::periodic_timer(1, \&callback_1sec_stream_advertisement);
