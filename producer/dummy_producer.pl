@@ -111,7 +111,7 @@ sub callback_get_metadata {
 # Write to metadata pipe
 	my $data = $ztatus_rsp;
 	$data->{'id'} = $id;
-	my $data_out = freeze($data);
+#	my $data_out = freeze($data);
 	syswrite($fh_metadata_pipe, $data_out);
 #store_fd($data, $fh_metadata_pipe);
 	print "Writes to metadata pipe id: $id\n";

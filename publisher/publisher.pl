@@ -1,15 +1,19 @@
 #!/usr/bin/perl
 use warnings;
 use strict;
-
+use Data::Dumper;
+print Dumper @ARGV;
+exit();
 use lib 'lib';
 use PubSub::Util;
 
 use Pod::Usage;
-use Getopt::Long qw( :config auto_version auto_help no_ignore_case bundling);
+#use Getopt::Long qw( :config auto_version auto_help no_ignore_case bundling);
 use IPC::Run qw( start  );
 use Net::oRTP;
 use Try::Tiny;
+
+use JSON;
 
 use Net::SDP;
 use Net::RTP::Packet;
@@ -17,10 +21,9 @@ use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use IO::Async::Stream;
 
-use Storable qw(thaw); 
+use Storable qw(nfreeze); 
 use IO::Select;
 
-use Data::Dumper;
 # Test node
 #
 # Author:     Mathias Neerup
@@ -75,6 +78,7 @@ my $buffer_size = 4096;
 my $wellknown_address = "ff15::beef";
 
 my @stream_descriptions = ();
+my $metadatafmt = "json";
 
 #================ Defaults ==============#
 my @def_metadata_pipe_path = ($ENV{'METADATA_PIPE_PATH'}, "/tmp/pipe_publisher_metadata");
@@ -82,8 +86,9 @@ my @def_data_pipe_path = ($ENV{'DATA_PIPE_PATH'}, "/tmp/pipe_publisher_data");
 my @def_executable_path = ($ENV{'PRODUCER_EXECUTABLE'}, "./");
 
 GetOptions(
-    'verbose|v+' =>\$verbose,
+    'verbose|v' => sub {$verbose++; print "verbose increased \n"},
     'exec|e=s' => \$exec,
+    'metadatafmt=s' => \$metadatafmt,
     'data_pipe|dp=s' => \$data_pipe_path,
     'metadata_pipe|mp=s' => \$metadata_pipe_path,
 ) or usage();
@@ -109,6 +114,7 @@ if ($exec){
 	}
 
 }
+
 # Porpulate variables with values in order Parameter, environment, default
 $metadata_pipe_path = PubSub::Util::apply_defaults($metadata_pipe_path, @def_metadata_pipe_path);
 $data_pipe_path = PubSub::Util::apply_defaults($data_pipe_path, @def_data_pipe_path);
@@ -204,9 +210,12 @@ my $h_prod = start(\@command_prod, \$in_prod, \$out_prod, \$err_prod) or error("
 my $callback_data = sub {
 	my ( $self, $buffref, $eof ) = @_;
 
-	$rtp_session->raw_rtp_send(123456, $$buffref);
-
-	print "data incomming from data pipe\n" if $verbose > 1;
+	if($buffref && $$buffref ne ""){
+		$rtp_session->raw_rtp_send(123456, $$buffref);
+		print "data incomming from data pipe\n" if $verbose > 1;
+	} else {
+		print "No data from datapipe\n";
+	}
 
 	if( $eof ) {
 	   print "EOF; last partial line is $$buffref\n";
@@ -218,9 +227,27 @@ my $callback_data = sub {
 my $callback_metadata = sub {
 	my ( $self, $buffref, $eof ) = @_;
 
-	my $data = thaw($$buffref);
-	print Dumper $data;
+	#my $data = thaw($$buffref);
+	#print Dumper $data;
+	my $data;
+	print "Metadata format: $metadatafmt\n" if $verbose > 2;
+
+	if($metadatafmt eq "json"){
+		print "--$$buffref--\n";
+		try {
+			$data = decode_json($$buffref);
+		} catch {
+			warn "Unable to decode json metadata: $_"; # not $@
+		};
+	} elsif($metadatafmt eq "yaml") {
+		print "YAML NOT IMPLEMENTED\n";
+		return 0;
+	}
+	
 	undef $$buffref;
+#	my $nonenssential = nfreeze($data->{'nonessential'});
+
+	print Dumper($data);
 #	while( $$buffref =~ s/^(.*\n)// ) {
 #	   print "[ Producer (metadata)]: $1";
 #	}

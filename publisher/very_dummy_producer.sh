@@ -15,7 +15,10 @@ echo "Starting node"
 sleep 1
 echo "Loading stuff";
 sleep 1;
+cat <>$1 &
+cat <>$2 &
 while sleep 1; do
 	date > $1;
-	echo "Metadata: $(date)" > $2;
+	cat metadata_example.json > $2	
+#	date > $2
 done

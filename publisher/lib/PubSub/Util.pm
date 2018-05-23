@@ -82,7 +82,7 @@ sub create_pipe_stream {
 
 	my $stream = IO::Async::Stream->new(
 	   read_handle  => $fh,
-	   read_len => 4096,
+	   read_len => $readlen,
 	   on_read => $callback,
 	);
 	undef $fh;
