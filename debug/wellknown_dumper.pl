@@ -10,6 +10,7 @@ use Getopt::Long qw( :config auto_version auto_help no_ignore_case bundling);
 use IPC::Run qw( start  );
 use Net::oRTP;
 use Try::Tiny;
+use Storable qw(thaw);
 
 
 use lib 'lib';
@@ -60,24 +61,33 @@ my $wk_rtp_handler = IO::Async::Stream->new(
 	read_handle  => $fh,
 	on_read => sub {
 		my ( $self, $buffref, $eof ) = @_;
-		my $packet = new Net::RTP::Packet($$buffref);
-		my $payload = $packet->{'payload'};
-		undef $$buffref;
-		
 		if( $eof ) {
-		   print "EOF; last partial line is $$buffref\n";
+		   print "EOF; from wk RTP stream\n";
+		   return 0;
 		}
-		 
-		my $sdp = Net::SDP->new($payload);
-		my $tool = $sdp->session_attribute( 'tool' );
-		my $out = "";
-		my $media_list = $sdp->media_desc_arrayref();
-		for my $media (@$media_list){
-			$out.= $media->default_format().", ";
-			$out.= "Multicast: ". $media->address().":".$media->port()."\n";
+
+		my $packet = new Net::RTP::Packet($$buffref);
+		undef $$buffref;
+
+		my $payload = $packet->{'payload'};
+		if($packet->{'marker'} eq "1"){
+			# From md profile, this is nonessential metadata (mark = 1)
+			my $nonessential = thaw($payload);
+			print Dumper $nonessential;
+		} else {
+		
+			 
+			my $sdp = Net::SDP->new($payload);
+			my $tool = $sdp->session_attribute( 'tool' );
+			my $out = "";
+			my $media_list = $sdp->media_desc_arrayref();
+			for my $media (@$media_list){
+				$out.= $media->default_format().", ";
+				$out.= "Multicast: ". $media->address().":".$media->port()."\n";
+			}
+			print "SDP from '$tool', format: $out";
+			print $sdp->generate() if $verbose > 0;
 		}
-		print "SDP from '$tool', format: $out";
-		print $sdp->generate() if $verbose > 0;
 		print "-"x100;
 		print "\n";
 		return 0;

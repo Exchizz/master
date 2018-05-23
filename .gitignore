@@ -1,1 +1,4 @@
 *.swp
+makefile/
+a.out
+bat_tracker/

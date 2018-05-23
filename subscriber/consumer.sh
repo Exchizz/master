@@ -12,13 +12,11 @@ for (( i=0;i<$ELEMENTS;i++)); do
 done
 
 echo "Starting node consumer"
-sleep 1
 echo "Loading stuff consumer";
-sleep 1;
-
 while true; do
-	if read line <$1; then
-		echo $line
+	echo "Waiting for data on pipe: $2...";
+	if read line <$2; then
+		echo $line | jq . | tee >> /tmp/nonessential
 	else
 		echo "running consumer";
 	fi;

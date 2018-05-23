@@ -16,6 +16,9 @@ use Net::RTP::Packet;
 use Net::oRTP;
 use IO::Handle;
 use Data::Dumper;
+use JSON;
+
+use Storable qw(thaw);
 
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
@@ -40,6 +43,7 @@ my $metadata_pipe_path = undef;
 my $consumer_parameters = ();
 
 my $wellknown_address = "ff15::beef";
+my $metadatafmt = "json";
 
 # Internally used objects
 my %joinedMulticastGroups = ();
@@ -53,6 +57,7 @@ my @def_executable_path = ($ENV{'PRODUCER_EXECUTABLE'}, "./consumer.sh");
 GetOptions(
     'verbose|v+' =>\$verbose,
     'exec|e=s' => \$executable_path,
+    'metadatafmt=s' => \$metadatafmt,
     'data_pipe|dp=s' => \$data_pipe_path,
     'metadata_pipe|mp=s' => \$metadata_pipe_path,
 ) or usage();
@@ -125,6 +130,8 @@ my $process = IO::Async::Process->new(
 #========== Open pipes ===========#
 open(my $data_pipe_fh, "+< $data_pipe_path") or die "The FIFO file \"$data_pipe_path\" is missing\n";
 $data_pipe_fh->autoflush(1);
+open(my $metadata_pipe_fh, "+< $metadata_pipe_path") or die "The FIFO file \"$metadata_pipe_path\" is missing\n";
+$metadata_pipe_fh->autoflush(1);
 #=========== Connect to RTCP socket ========="
 
 # Create a receive object
@@ -142,28 +149,44 @@ my $wk_rtp_handler = IO::Async::Stream->new(
     on_read => sub {
 	my ( $self, $buffref, $eof ) = @_;
 
-	my $packet = new Net::RTP::Packet($$buffref);
-	my $payload = $packet->{'payload'};
-
-	my $sdp = Net::SDP->new($payload);
-	my $tool = $sdp->session_attribute( 'tool' );
-	my $out = "";
-	my $media_list = $sdp->media_desc_arrayref();
-	for my $media (@$media_list){
-		$out.= $media->default_format().", ";
-		$out.= "Multicast: ". $media->address().":".$media->port()."\n";
-	}
-	print "SDP from '$tool', format: $out";
-	if(1){
-		join_stream($sdp);
-	}
-	print $sdp->generate() if $verbose > 0;
-
-	undef $$buffref;
-
 	if( $eof ) {
 	   print "EOF; last partial line is $$buffref\n";
+	   return 0;
 	}
+
+	my $packet = new Net::RTP::Packet($$buffref);
+
+	my $payload = $packet->{'payload'};
+	if($packet->{'marker'} eq "1"){
+		# From md profile, this is nonessential metadata (mark = 1)
+		my $nonessential = thaw($payload);
+		my $data;
+		if($metadatafmt eq "json"){
+			$data = encode_json($nonessential);
+		} elsif($metadatafmt eq "yaml"){
+			print "NOT IMPLEMENTED YET\n";
+			return 0;
+		}
+
+		print Dumper $nonessential;
+		print $metadata_pipe_fh $data."\n";
+	} else {
+		my $sdp = Net::SDP->new($payload);
+		my $tool = $sdp->session_attribute( 'tool' );
+		my $out = "";
+		my $media_list = $sdp->media_desc_arrayref();
+		for my $media (@$media_list){
+			$out.= $media->default_format().", ";
+			$out.= "Multicast: ". $media->address().":".$media->port()."\n";
+		}
+		print "SDP from '$tool', format: $out";
+		if(1){
+			join_stream($sdp);
+		}
+		print $sdp->generate() if $verbose > 0;
+	}
+	undef $$buffref;
+
 	
 	return 0;
     }
