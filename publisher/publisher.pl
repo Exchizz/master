@@ -2,13 +2,11 @@
 use warnings;
 use strict;
 use Data::Dumper;
-print Dumper @ARGV;
-exit();
 use lib 'lib';
 use PubSub::Util;
 
 use Pod::Usage;
-#use Getopt::Long qw( :config auto_version auto_help no_ignore_case bundling);
+use Getopt::Long qw( :config auto_version auto_help no_ignore_case bundling);
 use IPC::Run qw( start  );
 use Net::oRTP;
 use Try::Tiny;
@@ -65,6 +63,7 @@ my $pub_uuid = substr($guid->as_string, 0, 13);
 my $producer_parameters = ();
 my %known_occupied_groups = ();
 my $wait_for_announcements = 5; # seconds
+my $autogen_ip = 1;
 
 # Generate random ip(length 4, prepend 0)
 my $rand_ip = sprintf("%04x",int(rand(2**16)));
@@ -88,6 +87,7 @@ my @def_executable_path = ($ENV{'PRODUCER_EXECUTABLE'}, "./");
 GetOptions(
     'verbose|v' => sub {$verbose++; print "verbose increased \n"},
     'exec|e=s' => \$exec,
+    'autogen_ip=s' => \$autogen_ip,
     'metadatafmt=s' => \$metadatafmt,
     'data_pipe|dp=s' => \$data_pipe_path,
     'metadata_pipe|mp=s' => \$metadata_pipe_path,
@@ -143,14 +143,15 @@ $wk_rtp_session->set_recv_payload_type( 0 );
 open(my $fh1, "<&=", $wk_rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
 
 
-while( is_ipv6_taken($fh1, $multicast_addr) ){
-	# Generate random ip(length 4, prepend 0)
-	$rand_ip = sprintf("%04x",int(rand(2**16)));
-
-	$multicast_addr = sprintf("ff15::%s",$rand_ip);
-	print "New random IPv6 multicast ip: $multicast_addr\n";
+if($autogen_ip){
+	while( is_ipv6_taken($fh1, $multicast_addr) ){
+		# Generate random ip(length 4, prepend 0)
+		$rand_ip = sprintf("%04x",int(rand(2**16)));
+	
+		$multicast_addr = sprintf("ff15::%s",$rand_ip);
+		print "New random IPv6 multicast ip: $multicast_addr\n";
+	}
 }
-
 
 ##========= Create RTP session =========#
 # Create a send/receive object
@@ -209,27 +210,35 @@ my $h_prod = start(\@command_prod, \$in_prod, \$out_prod, \$err_prod) or error("
 
 my $callback_data = sub {
 	my ( $self, $buffref, $eof ) = @_;
+	if( $eof ) {
+	   print "EOF from datapipe\n";
+	   return 0;
+	}
 
-	if($buffref && $$buffref ne ""){
+	if($buffref && length($$buffref) > 0){
 		$rtp_session->raw_rtp_send(123456, $$buffref);
-		print "data incomming from data pipe\n" if $verbose > 1;
+		print "data incomming from data pipe\n" if $verbose > 5;
 	} else {
 		print "No data from datapipe\n";
 	}
 
-	if( $eof ) {
-	   print "EOF; last partial line is $$buffref\n";
-	}
 	undef $$buffref;
 	return 0;
 };
 
 my $callback_metadata = sub {
 	my ( $self, $buffref, $eof ) = @_;
+	if( $eof ) {
+	   print "EOF from medata pipe\n";
+	   return 0;
+	}
 
 	#my $data = thaw($$buffref);
-	#print Dumper $data;
+
 	my $data;
+	my $essential_md;
+	my $nonessential_md;
+
 	print "Metadata format: $metadatafmt\n" if $verbose > 2;
 
 	if($metadatafmt eq "json"){
@@ -244,16 +253,10 @@ my $callback_metadata = sub {
 		return 0;
 	}
 	
-	undef $$buffref;
-#	my $nonenssential = nfreeze($data->{'nonessential'});
+	my $nonenssential = nfreeze($data->{'nonessential'});
 
-	print Dumper($data);
-#	while( $$buffref =~ s/^(.*\n)// ) {
-#	   print "[ Producer (metadata)]: $1";
-#	}
-	if( $eof ) {
-	   print "EOF; last partial line is $$buffref\n";
-	}
+	$wk_rtp_session->raw_rtp_send(0, $nonenssential); 
+	undef $$buffref;
 	return 0;
 };
 my $data_stream = PubSub::Util::create_pipe_stream($data_pipe_path, $callback_data, $buffer_size);
