@@ -140,6 +140,8 @@ $wk_rtp_session->set_send_payload_type( 0 );
 $wk_rtp_session->set_local_addr( $wellknown_address, 5004, 5005);
 $wk_rtp_session->set_recv_payload_type( 0 );
 
+$wk_rtp_session->set_sdes_items('suas@batbox3');
+
 # Open file descripter
 open(my $fh1, "<&=", $wk_rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
 open(my $wk_rtcp_fh, "<&=", $wk_rtp_session->get_rtcp_fd()) or die "Can't open RTP file descripter. $!";
@@ -305,6 +307,7 @@ PubSub::Util::periodic_timer(5, \&callback_5sec);
 
 # Periodically 
 PubSub::Util::periodic_timer(1, \&callback_1sec_stream_advertisement);
+PubSub::Util::periodic_timer(1, \&callback_1_sec_sdes_send);
 
 
 print "Running main\n";
@@ -368,6 +371,11 @@ sub callback_1sec {
 #	chomp $out_prod;
 	my @lines =  split(/\n/,$out_prod);
 	print "[ Producer (stdout) ]: $_\n" for @lines;
+
+}
+sub callback_1_sec_sdes_send {
+	print "Sends RTCP SDES \n" if $verbose > 3;
+	$wk_rtp_session->raw_rtcp_sdes_send();
 }
 
 sub callback_1sec_stream_advertisement {
