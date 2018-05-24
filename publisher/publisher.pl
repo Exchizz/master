@@ -160,6 +160,7 @@ if($autogen_ip){
 ##========= Create RTP session =========#
 # Create a send/receive object
 my $rtp_session = new Net::oRTP('SENDONLY');
+$rtp_session->set_sdes_items('suas@batbox3');
 
 # Set it up
 $rtp_session->set_blocking_mode( 0 );
@@ -376,6 +377,7 @@ sub callback_1sec {
 sub callback_1_sec_sdes_send {
 	print "Sends RTCP SDES \n" if $verbose > 3;
 	$wk_rtp_session->raw_rtcp_sdes_send();
+	$rtp_session->raw_rtcp_sdes_send();
 }
 
 sub callback_1sec_stream_advertisement {
@@ -405,6 +407,7 @@ sub sigint_handler {
     print "Shutting down...\n";
     print "Sending bye to multicast group\n" if $verbose > 2;
     $wk_rtp_session->raw_rtcp_bye_send("Gracefully shutdown");
+    $rtp_session->raw_rtcp_bye_send("Gracefully shutdown");
     print "Killing producer...\n";
     my $retval = $h_prod->kill_kill || 2;
     print "Producer killed gracefully\n" if $retval eq 1;
