@@ -47,7 +47,7 @@ my $metadatafmt = "json";
 
 # Internally used objects
 my %joinedMulticastGroups = ();
-my $loop = IO::Async::Loop->new;
+our $loop = IO::Async::Loop->new;
 
 #================ Defaults ==============#
 my @def_metadata_pipe_path = ($ENV{'METADATA_PIPE_PATH'}, "/tmp/pipe_subscriber_metadata");
@@ -155,7 +155,7 @@ $wk_rtp_session->set_send_payload_type( 0 );
 $wk_rtp_session->set_local_addr( $wellknown_address, 5004, 5005);
 $wk_rtp_session->set_recv_payload_type( 0 );
 
-
+$wk_rtp_session->set_sdes_items('mneerup@error404');
 
 open(my $fh, "<&=", $wk_rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
 
@@ -282,6 +282,10 @@ print "Running main\n";
 register_signal_handler();
 
 $loop->add( $process );
+PubSub::Util::periodic_timer(1, \&callback_1_sec_sdes_send);
+
+
+
 #$loop->add( $data_stream);
 #$loop->add( $metadata_stream );
 $loop->add( $wk_rtp_handler );
@@ -298,6 +302,11 @@ while(1){
 
 sub register_signal_handler {
 	$SIG{INT}=\&sigint_handler;
+}
+
+sub callback_1_sec_sdes_send {
+        print "Sends RTCP SDES \n" if $verbose > 3;
+        $wk_rtp_session->raw_rtcp_sdes_send();
 }
 
 sub sigint_handler {
