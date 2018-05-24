@@ -47,6 +47,7 @@ my $metadatafmt = "json";
 
 # Internally used objects
 my %joinedMulticastGroups = ();
+my $joined_stream;
 our $loop = IO::Async::Loop->new;
 
 #================ Defaults ==============#
@@ -221,15 +222,16 @@ sub join_stream {
 
 		print "Joining multicast group: $multicastaddress:$multicastport\n";
 		# Create RTP session for Well-known RTP session
-		my $rtp_session = new Net::oRTP('RECVONLY');
-		$joinedMulticastGroups{"$multicastaddress:$multicastport"} = $rtp_session;
+		$joined_stream = new Net::oRTP('SENDRECV');
+		$joinedMulticastGroups{"$multicastaddress:$multicastport"} = $joined_stream;
 		
-		$rtp_session->set_blocking_mode( 0 );
-		$rtp_session->set_local_addr( $multicastaddress, $multicastport, $multicastport+1);
-		$rtp_session->set_recv_payload_type( 0 );
-		
-		print "fd:".$rtp_session->get_rtp_fd()."\n";
-		open(my $fh, "<&=", $rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
+		$joined_stream->set_blocking_mode( 0 );
+		$joined_stream->set_local_addr( $multicastaddress, $multicastport, $multicastport+1);
+		$joined_stream->set_recv_payload_type( 0 );
+		$joined_stream->set_remote_addr( $multicastaddress, $multicastport, $multicastport+1);
+	
+		print "fd:".$joined_stream->get_rtp_fd()."\n";
+		open(my $fh, "<&=", $joined_stream->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
 		
 		my $rtp_handler = IO::Async::Stream->new(
 			read_handle  => $fh,
@@ -247,7 +249,15 @@ sub join_stream {
 				return 0;
 			}
 		);
+
 		$loop->stop( "NewRtp" );
+		my $timer = IO::Async::Timer::Periodic->new(
+		   interval => 1,
+		   on_tick => sub { callback_1_sec_sdes_send($joined_stream) },
+		);
+
+		$timer->start;
+		$loop->add( $timer );
 		$loop->add( $rtp_handler  );
 	}
 }
@@ -305,14 +315,20 @@ sub register_signal_handler {
 }
 
 sub callback_1_sec_sdes_send {
+	my ($obj, $rtp_s) = @_;
+	# Set default value to wellknown rtp session;
+	$rtp_s //= $wk_rtp_session;
         print "Sends RTCP SDES \n" if $verbose > 3;
-        $wk_rtp_session->raw_rtcp_sdes_send();
+        $rtp_s->raw_rtcp_sdes_send();
 }
 
 sub sigint_handler {
     print "Shutting down...\n";
     print "Sending bye to multicast group\n" if $verbose > 2;
     $wk_rtp_session->raw_rtcp_bye_send("Gracefully shutdown");
+    print "Sending bye to source multicast group \n" if $verbose > 2;
+    $joined_stream->raw_rtcp_bye_send("Gracefully shutdown");
+    sleep 1;
     #print "Killing consumer...\n";
     #sleep 100
     #my $retval = $h_prod->kill_kill || 2;
