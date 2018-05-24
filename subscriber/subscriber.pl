@@ -135,12 +135,27 @@ $metadata_pipe_fh->autoflush(1);
 #=========== Connect to RTCP socket ========="
 
 # Create a receive object
-my $wk_rtp_session = new Net::oRTP('RECVONLY');
+#my $wk_rtp_session = new Net::oRTP('SENDRECV');
+#
+## Set it up
+#$wk_rtp_session->set_blocking_mode( 0 );
+#$wk_rtp_session->set_local_addr( $wellknown_address, 5004, 5005);
+#$wk_rtp_session->set_recv_payload_type( 0 );
 
-# Set it up
+
+#Create RTP session for Well-known RTP session
+my $wk_rtp_session = new Net::oRTP('SENDRECV');
+
 $wk_rtp_session->set_blocking_mode( 0 );
+$wk_rtp_session->set_remote_addr( $wellknown_address, 5004, 5005);
+$wk_rtp_session->set_multicast_ttl(10);
+$wk_rtp_session->set_multicast_loopback(1);
+$wk_rtp_session->set_send_payload_type( 0 );
+
 $wk_rtp_session->set_local_addr( $wellknown_address, 5004, 5005);
 $wk_rtp_session->set_recv_payload_type( 0 );
+
+
 
 open(my $fh, "<&=", $wk_rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
 
@@ -244,7 +259,11 @@ my $wk_rtcp_handler = IO::Async::Stream->new(
     on_read => sub {
 	my ( $self, $buffref, $eof ) = @_;
 	my $packet = new Net::RTCP::Packet($$buffref);
-	print Dumper $packet->{payload};
+	if($packet->{'bye'}){
+		print "Receiving RTCP BYE from node ssrc: $packet->{'bye'}->{'ssrc'}[0]\n"
+	}
+
+	print Dumper $packet;
 	undef $$buffref;
 
 	if( $eof ) {
@@ -283,7 +302,10 @@ sub register_signal_handler {
 
 sub sigint_handler {
     print "Shutting down...\n";
+    print "Sending bye to multicast group\n" if $verbose > 2;
+    $wk_rtp_session->raw_rtcp_bye_send("Gracefully shutdown");
     #print "Killing consumer...\n";
+    #sleep 100
     #my $retval = $h_prod->kill_kill || 2;
     #print "consumer killed gracefully\n" if $retval eq 1;
     #print "consumer killed\n" if $retval eq 0;
