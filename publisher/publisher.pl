@@ -15,6 +15,8 @@ use JSON;
 
 use Net::SDP;
 use Net::RTP::Packet;
+use Net::RTCP::Packet;
+
 use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use IO::Async::Stream;
@@ -141,6 +143,7 @@ $wk_rtp_session->set_recv_payload_type( 0 );
 
 # Open file descripter
 open(my $fh1, "<&=", $wk_rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
+open(my $wk_rtcp_fh, "<&=", $wk_rtp_session->get_rtcp_fd()) or die "Can't open RTP file descripter. $!";
 
 
 if($autogen_ip){
@@ -268,6 +271,28 @@ my $callback_metadata = sub {
 	undef $$buffref;
 	return 0;
 };
+
+
+my $wk_rtcp_handler = IO::Async::Stream->new(
+    read_handle  => $wk_rtcp_fh,
+    on_read => sub {
+       my ( $self, $buffref, $eof ) = @_;
+       my $packet = new Net::RTCP::Packet($$buffref);
+       if($packet->{'bye'}){
+              print "Receiving RTCP BYE from node ssrc: $packet->{'bye'}->{'ssrc'}[0]\n"
+       }
+
+       print Dumper $packet;
+       undef $$buffref;
+
+       if( $eof ) {
+          print "EOF; last partial line is $$buffref\n";
+       }
+       
+       return 0;
+    }
+);
+
 my $data_stream = PubSub::Util::create_pipe_stream($data_pipe_path, $callback_data, $buffer_size);
 my $metadata_stream= PubSub::Util::create_pipe_stream($metadata_pipe_path, $callback_metadata, $buffer_size);
 
@@ -289,6 +314,7 @@ register_signal_handler();
 
 $loop->add( $data_stream);
 $loop->add( $metadata_stream );
+$loop->add( $wk_rtcp_handler );
 $loop->run;
 
 #============= Routines ===========#
@@ -370,6 +396,8 @@ sub register_signal_handler {
 
 sub sigint_handler {
     print "Shutting down...\n";
+    print "Sending bye to multicast group\n" if $verbose > 2;
+    $wk_rtp_session->raw_rtcp_bye_send("Gracefully shutdown");
     print "Killing producer...\n";
     my $retval = $h_prod->kill_kill || 2;
     print "Producer killed gracefully\n" if $retval eq 1;
