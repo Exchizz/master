@@ -140,8 +140,11 @@ $wk_rtp_session->set_send_payload_type( 0 );
 $wk_rtp_session->set_local_addr( $wellknown_address, 5004, 5005);
 $wk_rtp_session->set_recv_payload_type( 0 );
 
+$wk_rtp_session->set_sdes_items('suas@batbox3');
+
 # Open file descripter
 open(my $fh1, "<&=", $wk_rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
+open(my $wk_rtcp_fh, "<&=", $wk_rtp_session->get_rtcp_fd()) or die "Can't open RTP file descripter. $!";
 
 
 if($autogen_ip){
@@ -269,6 +272,28 @@ my $callback_metadata = sub {
 	undef $$buffref;
 	return 0;
 };
+
+
+my $wk_rtcp_handler = IO::Async::Stream->new(
+    read_handle  => $wk_rtcp_fh,
+    on_read => sub {
+       my ( $self, $buffref, $eof ) = @_;
+       my $packet = new Net::RTCP::Packet($$buffref);
+       if($packet->{'bye'}){
+              print "Receiving RTCP BYE from node ssrc: $packet->{'bye'}->{'ssrc'}[0]\n"
+       }
+
+       print Dumper $packet;
+       undef $$buffref;
+
+       if( $eof ) {
+          print "EOF; last partial line is $$buffref\n";
+       }
+       
+       return 0;
+    }
+);
+
 my $data_stream = PubSub::Util::create_pipe_stream($data_pipe_path, $callback_data, $buffer_size);
 my $metadata_stream= PubSub::Util::create_pipe_stream($metadata_pipe_path, $callback_metadata, $buffer_size);
 
@@ -282,6 +307,7 @@ PubSub::Util::periodic_timer(5, \&callback_5sec);
 
 # Periodically 
 PubSub::Util::periodic_timer(1, \&callback_1sec_stream_advertisement);
+PubSub::Util::periodic_timer(1, \&callback_1_sec_sdes_send);
 
 
 print "Running main\n";
@@ -290,6 +316,7 @@ register_signal_handler();
 
 $loop->add( $data_stream);
 $loop->add( $metadata_stream );
+$loop->add( $wk_rtcp_handler );
 $loop->run;
 
 #============= Routines ===========#
@@ -344,6 +371,11 @@ sub callback_1sec {
 #	chomp $out_prod;
 	my @lines =  split(/\n/,$out_prod);
 	print "[ Producer (stdout) ]: $_\n" for @lines;
+
+}
+sub callback_1_sec_sdes_send {
+	print "Sends RTCP SDES \n" if $verbose > 3;
+	$wk_rtp_session->raw_rtcp_sdes_send();
 }
 
 sub callback_1sec_stream_advertisement {
@@ -371,6 +403,8 @@ sub register_signal_handler {
 
 sub sigint_handler {
     print "Shutting down...\n";
+    print "Sending bye to multicast group\n" if $verbose > 2;
+    $wk_rtp_session->raw_rtcp_bye_send("Gracefully shutdown");
     print "Killing producer...\n";
     my $retval = $h_prod->kill_kill || 2;
     print "Producer killed gracefully\n" if $retval eq 1;
