@@ -281,10 +281,13 @@ my $wk_rtcp_handler = IO::Async::Stream->new(
        my ( $self, $buffref, $eof ) = @_;
        my $packet = new Net::RTCP::Packet($$buffref);
        if($packet->{'bye'}){
-              print "Receiving RTCP BYE from node ssrc: $packet->{'bye'}->{'ssrc'}[0]\n"
+              print "Receiving RTCP BYE from node ssrc: ".%{$packet->{'bye'}->{'ssrc'}}[0]."\n"
        }
-
-       print Dumper $packet;
+       if(keys %{$packet->{'sdes'}}){
+	      my ($ssrc) = %{$packet->{'sdes'}};
+	      print "Receiving RTCP SDES from node ssrc: $ssrc\n";
+       }
+#       print Dumper $packet;
        undef $$buffref;
 
        if( $eof ) {
