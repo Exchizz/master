@@ -49,7 +49,8 @@ my $metadatafmt = "json";
 my %joinedMulticastGroups = ();
 my $joined_stream;
 our $loop = IO::Async::Loop->new;
-
+# Match all session names
+my $session_name = ".*";
 #================ Defaults ==============#
 my @def_metadata_pipe_path = ($ENV{'METADATA_PIPE_PATH'}, "/tmp/pipe_subscriber_metadata");
 my @def_data_pipe_path = ($ENV{'DATA_PIPE_PATH'}, "/tmp/pipe_subscriber_data");
@@ -59,6 +60,7 @@ GetOptions(
     'verbose|v+' =>\$verbose,
     'exec|e=s' => \$executable_path,
     'metadatafmt=s' => \$metadatafmt,
+    'session_name=s' => \$session_name,
     'data_pipe|dp=s' => \$data_pipe_path,
     'metadata_pipe|mp=s' => \$metadata_pipe_path,
 ) or usage();
@@ -156,7 +158,7 @@ $wk_rtp_session->set_send_payload_type( 0 );
 $wk_rtp_session->set_local_addr( $wellknown_address, 5004, 5005);
 $wk_rtp_session->set_recv_payload_type( 0 );
 
-$wk_rtp_session->set_sdes_items('mneerup@error404');
+$wk_rtp_session->set_sdes_items('Wellknown from subscriber');
 
 open(my $fh, "<&=", $wk_rtp_session->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
 
@@ -196,8 +198,10 @@ my $wk_rtp_handler = IO::Async::Stream->new(
 			$out.= "Multicast: ". $media->address().":".$media->port()."\n";
 		}
 		print "SDP from '$tool', format: $out";
-		if(1){
+		if($sdp->session_name() =~ /$session_name/i){
 			join_stream($sdp);
+		} else {
+			print "Session name: $session_name does not match ".$sdp->session_name()."\n" if $verbose > 3;
 		}
 		print $sdp->generate() if $verbose > 0;
 	}
@@ -229,6 +233,7 @@ sub join_stream {
 		$joined_stream->set_local_addr( $multicastaddress, $multicastport, $multicastport+1);
 		$joined_stream->set_recv_payload_type( 0 );
 		$joined_stream->set_remote_addr( $multicastaddress, $multicastport, $multicastport+1);
+		$joined_stream->set_sdes_items('Joined from subscriber');
 	
 		print "fd:".$joined_stream->get_rtp_fd()."\n";
 		open(my $fh, "<&=", $joined_stream->get_rtp_fd()) or die "Can't open RTP file descripter. $!";
@@ -244,7 +249,7 @@ sub join_stream {
 				if( $eof ) {
 				   print "EOF; last partial line is $$buffref\n";
 				}
-				 
+				syswrite($data_pipe_fh, $payload);
 				print "Received packet from RTP stream\n!      payload: $payload\n";
 				return 0;
 			}
@@ -253,7 +258,7 @@ sub join_stream {
 		$loop->stop( "NewRtp" );
 		my $timer = IO::Async::Timer::Periodic->new(
 		   interval => 1,
-		   on_tick => sub { callback_1_sec_sdes_send($joined_stream) },
+		   on_tick => sub { $joined_stream->raw_rtcp_sdes_send(); }
 		);
 
 		$timer->start;
@@ -315,11 +320,8 @@ sub register_signal_handler {
 }
 
 sub callback_1_sec_sdes_send {
-	my ($obj, $rtp_s) = @_;
-	# Set default value to wellknown rtp session;
-	$rtp_s //= $wk_rtp_session;
         print "Sends RTCP SDES \n" if $verbose > 3;
-        $rtp_s->raw_rtcp_sdes_send();
+        $wk_rtp_session->raw_rtcp_sdes_send();
 }
 
 sub sigint_handler {
