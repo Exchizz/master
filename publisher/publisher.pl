@@ -522,10 +522,69 @@ sub usage {
     exit 1;
 }
 
+
 =head1 NAME
 
-array-cmd -- listener daemon for commands from the array master.
+publisher.pl -- Interface for the MCLURS streaming architecture
 
 =head1 SYNOPSIS
 
-	script.pl --stuff
+publisher.pl [--help|-h] [--verbose|-v] [--producer|p <path>]
+    [--autogen_ip 1|0] [--metadatafmt <format>] [--data_pipe|-dp <path>] [--metadata_pipe|-mp <path>]
+        [--sdprate <period>] [--sdesrate <period>] [--srrate <period>] -- <arguments passed to producer>
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--verbose|-v>
+
+Increase chattiness of the daemon.
+
+=item B<--help|-h>
+
+Print this usage text and exit.
+
+=item B<--producer> <path>
+
+Path to an executable producer.
+
+=item B<--autogen_ip> 1|0
+
+Specifies whether the IP conflict handler should be enabled. If set to 1, the publisher.pl will handle an IPv6 conflict on the source multicast group.
+
+=item B<--data_pipe|-dp> <path>
+
+Specifies the path the where the datapipe should be created. If the pipe exists, the existing pipe will be used. Default is /tmp/subscriber_data_pipe
+
+=item B<--metadata_pipe|-mp> <path>
+
+Specifies the path the where the metadatapipe should be created. If the pipe exists, the existing pipe will be used. Default is /tmp/subscriber_metadata_pipe
+
+=item B<--sdesrate> <period>
+
+How often the RTCP SDES packet should be resent. Period is in seconds.
+
+=item B<--sdprate> <period>
+
+How often the SDP packet should be resent. Period is in seconds.
+
+=item B<--srrate> <period>
+
+How often the RTCP SR packet should be resent. Period is in seconds.
+
+
+=back
+
+=head1 DESCRIPTION
+
+The publisher is used to publish data to a source multicast group. The publisher will execute the producer specified as parameter. The producer will receive two arguments.
+The first is the path to the data pipe and the second is the path to the metadatapipe. The producer should just open the pipes and write data. For the encoding of the datapipe,
+the publisher is agnostic. For the metadata-encoding, the encoding is set by the --metadatafmt parameter. In the current version, only json is supported. The metadata written to the
+metadatapipe should contain two keys, "essential" and "nonessential". Whaever is specified in "nonessential" will be sent to subscribers>. What specified in "essential" will
+be added to the SDP-file announced by the publisher.
+
+=over 4
+
+=cut
+
