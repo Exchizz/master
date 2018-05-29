@@ -9,6 +9,7 @@ use Fcntl qw(F_GETPIPE_SZ O_NONBLOCK  O_WRONLY F_SETPIPE_SZ);
 use Storable qw(freeze);
 use IO::Handle;
 
+use JSON;
 use ZMQ;
 use ZMQ::Constants qw(:all);
 
@@ -47,8 +48,9 @@ my $zero_mem;
 my $sleep_s;
 my $snap = "tcp://127.0.0.1:7777";
 my $snap_length = 2048; # in samples
-my $snap_count = 200;
+my $snap_count = 100;
 my $snap_time_offset;
+my $snap_isp = undef;
 
 my $mode = "snapshot";
 my $verbose = 0;
@@ -70,16 +72,17 @@ die("No data and metadata pipe specified") unless ( $metadata_pipe_path && $data
 print "data named pipe: $data_pipe_path\n" if $verbose > 0;
 print "metadata named pipe: $metadata_pipe_path\n" if $verbose > 0;
 
+my $fh_data_pipe;
+
 # Open data pipe
-sysopen(my $fh_data_pipe, $data_pipe_path, O_WRONLY | O_NONBLOCK)         or die $!;
+if($mode eq "dummy"){
+	sysopen($fh_data_pipe, $data_pipe_path, O_WRONLY | O_NONBLOCK)         or die $!;
+	my ($initial_size, $new_size, $verify_size) = set_pipe_size($fh_data_pipe, $new_pipe_size);
+	print "Initial data pipe size: $initial_size, new size: $new_size, verify size: $verify_size\n" if $verbose > 0;
+	# Set fd to non blocking
+	select((select($fh_data_pipe), $| = 1)[0]);
+}
 sysopen(my $fh_metadata_pipe, $metadata_pipe_path, O_WRONLY | O_NONBLOCK)         or die $!;
-
-# Set pipe size
-my ($initial_size, $new_size, $verify_size) = set_pipe_size($fh_data_pipe, $new_pipe_size);
-print "Initial data pipe size: $initial_size, new size: $new_size, verify size: $verify_size\n" if $verbose > 0;
-
-# Set fd to non blocking
-select((select($fh_data_pipe), $| = 1)[0]);
 
 my $zmq_ctx = ZMQ::Context->new();
 
@@ -103,21 +106,13 @@ sub callback_get_metadata {
 	my (@args) = @_;
 	my $ztatus_rsp = send1("Ztatus", $zmq_snapshot);
 	my $now_ns = $ztatus_rsp->{now_ns};
-	my $now_s = $now_ns/(1e9);
+#	my $now_s = $now_ns/(1e9);
+	my $hix = $ztatus_rsp->{'hix'};
 
-        my $datestring = localtime(snapshot_time_to_utc($now_s));
-        print "Before sleep 5: $datestring\n";
-
-# Write to metadata pipe
-	my $data = $ztatus_rsp;
-	$data->{'id'} = $id;
-#	my $data_out = freeze($data);
-	syswrite($fh_metadata_pipe, $data_out);
-#store_fd($data, $fh_metadata_pipe);
-	print "Writes to metadata pipe id: $id\n";
-	$fh_metadata_pipe->flush();
-
-	$id++;
+        #my $datestring = localtime(snapshot_time_to_utc($now_s));
+        #print "hix at UTC: $datestring\n";
+	essential_metadata_hix_now($hix, $now_ns);
+#	get_64bit_ntp_from_sample($rtp_time, $now_s, $hix);
 }
 
 if($mode eq "snapshot"){
@@ -126,7 +121,7 @@ if($mode eq "snapshot"){
 	$args->{start}  = 0;
 	$args->{length} = $snap_length;
 	$args->{count} = $snap_count;
-	$args->{stream} = $data_pipe_path;
+	$args->{stream} = "/tmp/pipe_publisher_data_snap";#$data_pipe_path;
 	
 	# Send command to snapshot process
 	my $snap_name = $SNAP->snap( %{$args} );
@@ -139,6 +134,11 @@ if($mode eq "snapshot"){
 	# Wait for snapshot to be ready
 	sleep 1;
 	$snap_time_offset = get_time_offset();
+
+	my $essential = {};
+	$essential->{'isp'} = $snap_isp;
+	$essential->{'snap_time_offset'} = $snap_time_offset;
+	send_essential_metadata($essential);
 }
 
 if($mode eq "dummy"){
@@ -152,7 +152,6 @@ if($mode eq "dummy"){
 	   on_tick =>\&callback_send_pkg,
 	);
 
-
 	print "sleeping period: ".$sleep_s."\n" if $verbose > 0;
 	print "Writing $chunksize bytes of data at $bandwidth bytes/sec\n" if $verbose > 0;
 	$timer_send->start;
@@ -165,6 +164,26 @@ $loop->add( $timer_get_metadata );
 $loop->run;
 
 #========= SUB ROUTINES =============#
+sub send_essential_metadata {
+	my $metadata = shift;
+	my $out = {"essential" => $metadata};
+	my $json = encode_json($out);
+	#print "Json essential metadata sent\n";
+	syswrite($fh_metadata_pipe, $json);
+}
+
+sub essential_metadata_hix_now {
+	my ($hix, $now_ns) = @_;
+	my $out = {};
+	$out->{'essential'} = {"hix" => $hix, "now_ns" => $now_ns};
+	my $json = encode_json($out);
+	#print "Json sent with hix: $hix, now_ns: $now_ns\n";
+	syswrite($fh_metadata_pipe, $json);
+}
+
+
+
+
 sub snapshot_time_to_utc {
 	my ($tmp) = @_;
 	return $snap_time_offset + $tmp;
@@ -183,9 +202,9 @@ sub get_time_offset {
 
 	my $now_test = get_snapshot_time();
 	my $datestring = localtime($offset + $now_test);
-	print "Before sleep 5: $datestring\n";
+	print "Before sleep 1: $datestring\n";
 
-	sleep 5;
+	sleep 1;
 	
 	$now_test = get_snapshot_time();
 	$datestring = localtime($offset + $now_test);
@@ -201,6 +220,7 @@ sub get_snapshot_time {
 	my $now = $tmp->{now_ns}/1e9;
 	return $now;
 }
+
 sub send1{
 	my ($cmd, $zmq_snapshot) = @_;
 	
@@ -227,7 +247,7 @@ sub send1{
 		return;
 	}
 	# info: READER ACTIVE hix: 0x0000003882b800 [spl] tix: 0x00000037965000 [spl] now: 0x0013a1fc51c7fc [ns]
-print $info."\n";
+#print $info."\n";
 	my ($hix, $tix, $now_ns) = ($info =~ /READER\s*ACTIVE\s*hix:\s*(.*?)\s*\[spl\]\s*tix:\s*(.*?)\s*\[spl\]\s*now:\s*(.*?)\s*\[ns\]/);
 	#my $now_s = bighex($now_ns)/(1e9);
 	#printf "%02d:%02d:%02d\n", $now_s/3600, $now_s/60%60, $now_s%60;
@@ -254,9 +274,15 @@ sub zmq_setup {
 	      unless ( $SNAP->busy() );
 	}
 	
+	print "Shutdown snapshot...\n";
+	$SNAP->quit();
+	print "Wait for snapshot to restart\n";
+	sleep(1);
 	die($SNAP->error()) unless ( $SNAP->setup() );     # Initialise the snapshotter
 	die($SNAP->error())  unless ( $SNAP->start() );  # Start capture
-	
+#	print Dumper $SNAP;
+	$snap_isp = $SNAP->{'isp'};
+	#print "ISP IS: ".$SNAP->{'isp'}."\n";
 	return ($SNAP);
 }
 
