@@ -352,10 +352,65 @@ sub usage {
     exit 1;
 }
 
+
 =head1 NAME
 
-array-cmd -- listener daemon for commands from the array master.
+subscriber.pl -- Interface for the MCLURS streaming architecture.
 
 =head1 SYNOPSIS
 
-	script.pl --stuff
+array-cmd [--help|-h] [--verbose|-v] [--consumer <path>]
+    [--metadatafmt <format>] [--session_name <name>] [--data_pipe|-dp <path>] [--metadata_pipe|-mp <path>]
+        [--sdesrate <period>] -- <arguments to consumer>
+
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--verbose|-v>
+
+Increase chattiness of the daemon.
+
+=item B<--help|-h>
+
+Print this usage text and exit.
+
+=item B<--consumer> <path>
+
+Path to an executable consumer.
+
+=item B<--metadatafmt> json | yaml(not implemented)
+
+Specifies the encoding of the metadata received by the consumer from the metadatapipe. If json is chosen, the format will be json encoded
+
+=item B<--session_name> <regex>
+
+Specifies what the session_name should match in order for the subscriber.pl to join the source multicast group. The argument should be specified as a regular expression. The regex will be matched incasesensitive.
+
+=item B<--data_pipe|-dp> <path>
+
+Specifies the path the where the datapipe should be created. If the pipe exists, the existing pipe will be used. Default is /tmp/subscriber_data_pipe
+
+=item B<--metadata_pipe|-mp> <path>
+
+Specifies the path the where the metadatapipe should be created. If the pipe exists, the existing pipe will be used. Default is /tmp/subscriber_metadata_pipe
+
+=item B<--sdesrate> <period>
+
+How often the RTCP SDES packet should be resent. Period is in seconds.
+
+
+=back
+
+=head1 DESCRIPTION
+
+The subscriber is used to subscribe to a source multicast group. The subscriber provides data and metadata from the joined source multicast group to the consumer.
+The consumer provided as an argument will be run with two arguments. The first is the path to the datapipe and the second is the path to the metadatapipe.
+The consumer should open and read from both pipes in order to get data and metadata. The metadata will be in the format specified by --metadatafmt ad the subscriber.
+
+
+=over 4
+
+=cut
+
