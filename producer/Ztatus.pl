@@ -42,6 +42,7 @@ my $datestring = getnow($offset + $now_test);
 my $nowz = getnow(time());
 print "Datetime from Ztatus: $datestring realclock: ".$nowz."\n";
 
+print "localtime: ".localtime()."\n";
 
 sub send1{
 	my ($cmd) = @_;
