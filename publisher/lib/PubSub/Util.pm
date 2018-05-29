@@ -99,7 +99,7 @@ sub create_named_pipe {
 		if (mkfifo($pipe_path, $mode)) {
 			print "Pipe successfully created at $pipe_path\n" if $main::verbose > 0;
 		} else {
-			error("Unable to create data pipe");
+			print "Unable to create data pipe";
 		}
 	}
 	chmod 0777, $pipe_path;
