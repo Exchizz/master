@@ -90,6 +90,10 @@ my $wellknown_address = "ff15::beef";
 my @stream_descriptions = ();
 my $metadatafmt = "json";
 
+my $sdprate = 1;
+my $sdesrate = 1;
+my $srrate = 1;
+
 #================ Defaults ==============#
 my @def_metadata_pipe_path = ($ENV{'METADATA_PIPE_PATH'}, "/tmp/pipe_publisher_metadata");
 my @def_data_pipe_path = ($ENV{'DATA_PIPE_PATH'}, "/tmp/pipe_publisher_data");
@@ -97,11 +101,14 @@ my @def_executable_path = ($ENV{'PRODUCER_EXECUTABLE'}, "./");
 
 GetOptions(
     'verbose|v' => sub {$verbose++; print "verbose increased \n"},
-    'exec|e=s' => \$exec,
+    'producer=s' => \$exec,
     'autogen_ip=s' => \$autogen_ip,
     'metadatafmt=s' => \$metadatafmt,
     'data_pipe|dp=s' => \$data_pipe_path,
     'metadata_pipe|mp=s' => \$metadata_pipe_path,
+    'sdprate=s' => \$sdprate,
+    'sdesrate=s' => \$sdesrate,
+    'srrate=s' => \$srrate,
 ) or usage();
 
 print "Verbose: $verbose\n" if $verbose > 0;
@@ -376,9 +383,9 @@ PubSub::Util::periodic_timer(1, \&callback_1sec);
 PubSub::Util::periodic_timer(5, \&callback_5sec);
 
 # Periodically 
-PubSub::Util::periodic_timer(1, \&callback_1sec_stream_advertisement);
-PubSub::Util::periodic_timer(1, \&callback_1_sec_sdes_send);
-PubSub::Util::periodic_timer(1, \&callback_1sec_sr_send);
+PubSub::Util::periodic_timer($sdprate, \&callback_1sec_stream_advertisement);
+PubSub::Util::periodic_timer($sdesrate, \&callback_1_sec_sdes_send);
+PubSub::Util::periodic_timer($srrate, \&callback_1sec_sr_send);
 
 
 print "Running main\n";
