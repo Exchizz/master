@@ -15,7 +15,7 @@ echo "Starting node"
 sleep 1
 echo "Loading stuff";
 sleep 1;
-cat metadata_example.json > $2	
+cat metadata.json > $2
 echo "Write random cunks"
 #dd if=/dev/urandom bs=4k > $1
 while sleep 1; do
