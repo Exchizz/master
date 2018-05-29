@@ -51,6 +51,8 @@ my $joined_stream;
 our $loop = IO::Async::Loop->new;
 # Match all session names
 my $session_name = ".*";
+
+my $sdesrate = 1;
 #================ Defaults ==============#
 my @def_metadata_pipe_path = ($ENV{'METADATA_PIPE_PATH'}, "/tmp/pipe_subscriber_metadata");
 my @def_data_pipe_path = ($ENV{'DATA_PIPE_PATH'}, "/tmp/pipe_subscriber_data");
@@ -58,11 +60,12 @@ my @def_executable_path = ($ENV{'PRODUCER_EXECUTABLE'}, "./consumer.sh");
 
 GetOptions(
     'verbose|v+' =>\$verbose,
-    'exec|e=s' => \$executable_path,
+    'consumer=s' => \$executable_path,
     'metadatafmt=s' => \$metadatafmt,
     'session_name=s' => \$session_name,
     'data_pipe|dp=s' => \$data_pipe_path,
     'metadata_pipe|mp=s' => \$metadata_pipe_path,
+    'sdesrate=s' => \$sdesrate,
 ) or usage();
 
 print "Verbose: $verbose\n" if $verbose > 0;
@@ -297,7 +300,7 @@ print "Running main\n";
 register_signal_handler();
 
 $loop->add( $process );
-PubSub::Util::periodic_timer(1, \&callback_1_sec_sdes_send);
+PubSub::Util::periodic_timer($sdesrate, \&callback_1_sec_sdes_send);
 
 
 
