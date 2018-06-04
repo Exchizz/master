@@ -71,7 +71,7 @@ my $packet_cnt = 0;
 
 # Generate random integer between 0 and 2^32
 my $rtp_rnd_offset = int(rand(2**32));
-my $rtp_clockrate = 4096; # block size = 4096, each sample is 2 bytes = 2048 samples pr. cunk = pr. packet
+my $rtp_clockrate = 2048; # block size = 4096, each sample is 2 bytes = 2048 samples pr. cunk = pr. packet
 my $rtp_timestamp = $rtp_rnd_offset;
 
 my $snap_time_offset = undef;
@@ -243,17 +243,17 @@ sub callback_5sec{
 };
 
 sub unix_to_ntp {
-	my $seconds = shift;
+	my $duration = shift;
 	my $unix_epoch = DateTime->from_epoch( epoch => 0 );
 
-	my $fraction = $seconds-int($seconds);
-	my $ns = $fraction*1e9;
-
-	my $seconds = int($seconds);
-
-	my $dur_nanoseconds = DateTime::Duration->new( seconds => $seconds, nanoseconds => $ns );
-
-	$dur_nanoseconds = $unix_epoch + $dur_nanoseconds;
+#	my $fraction = $seconds-int($seconds);
+#	my $ns = $fraction*1e9;
+#
+#	my $seconds = int($seconds);
+#
+#	my $dur_nanoseconds = DateTime::Duration->new( seconds => $seconds, nanoseconds => $ns );
+#
+	my $dur_nanoseconds = $unix_epoch + $duration;
 
 	my $ntp_epoch = DateTime->new(
 	      year       => 1900,
@@ -274,26 +274,35 @@ use POSIX;
 
 
 my $last_rtp_timestamp = 0;
-my $last_rtcp_sr_timestamp = 0;
-
+my $last_rtcp_time = 0;
+my $tmp_hix = undef;
+my $tmp_now_ns = undef;
 sub callback_1sec_sr_send {
 	unless(exists $essential->{'hix'} && exists $essential->{'isp'}) {return};
 
 	my $hix = $essential->{'hix'};
-	my $now_s = $essential->{'now_ns'}/1e9;
-
 	my $snap_isp = $essential->{'isp'};
-	my $rtcp_sr_timestamp = get_64bit_ntp_from_sample($rtp_timestamp, $now_s, $hix, $snap_isp);
-	my $a = unix_to_ntp($rtcp_sr_timestamp);
+	my $now_ns = $essential->{'now_ns'};
+	if(not defined $tmp_hix and not defined $tmp_now_ns){
+		$tmp_hix = $hix;
+		$tmp_now_ns = $now_ns;
+		print "=======-------======== Variables set\n";
+	}
+	print "hix: $hix, rtp_rnd_offset. $rtp_rnd_offset, rtp_timestamp: $rtp_timestamp, now_ns: $now_ns\n";
+	my $sampleN = (($rtp_timestamp - $rtp_rnd_offset) - $tmp_hix);
+	my $rtcp_time_ns = $snap_isp*$sampleN + $tmp_now_ns;
+	print "rtcp time: $rtcp_time_ns, snap offset: $snap_time_offset\n";
+	my $rtcp_time = DateTime::Duration->new(seconds=>int($snap_time_offset), nanoseconds=> $rtcp_time_ns); # utc offset
+	my $a = unix_to_ntp($rtcp_time);
 	$rtp_session->raw_rtcp_sr_send($a);
 
-	my $rtp_diff = ($rtp_timestamp-$last_rtp_timestamp)*$snap_isp*1e-9;
-	my $rtcp_diff = $rtcp_sr_timestamp-$last_rtcp_sr_timestamp;
+	my $rtp_diff = abs($rtp_timestamp-$last_rtp_timestamp)*$snap_isp;
+	my $rtcp_diff = abs($rtcp_time->nanoseconds() - $last_rtcp_time);
 	print "RTP diff: ".$rtp_diff."\n";
 	print "RTCP diff: ".$rtcp_diff."\n";
-	print "Time error: ".($rtp_diff-$rtcp_diff)."\n";
+	print "Time error: ".abs($rtp_diff-$rtcp_diff)."\n";
 	$last_rtp_timestamp = $rtp_timestamp;
-	$last_rtcp_sr_timestamp = $rtcp_sr_timestamp;
+	$last_rtcp_time = $rtcp_time->nanoseconds;
 }
 
 
@@ -423,14 +432,10 @@ $loop->run;
 # This routine calculates the 64 bit timestamp using the snap_time_offset(calculated during startup), the random rtp_time, hix(high index) and the now, which is the time where hix-sample was in the buffer.
 
 
-sub get_64bit_ntp_from_sample {
-	my ($rtp_time, $now_s, $hix, $snap_isp) = @_;
-	$snap_isp = $snap_isp/1e9;
-	$hix = bighex($hix);
-	print "now_s: $now_s, snap_isp: $snap_isp, rtp_time: $rtp_time, rtp_rnd_offsset: $rtp_rnd_offset, snap_time_offset: $snap_time_offset\n";
-	my $rtcp_time = $now_s + $snap_isp*(($rtp_time - $rtp_rnd_offset) - $hix) + $snap_time_offset;
-	return $rtcp_time;
-}
+#sub get_64bit_ntp_from_sample {
+#	my ($rtp_time, $now_s, $hix, $snap_isp) = @_;
+#	$snap_isp = $snap_isp/1e9	return $rtcp_time;
+#}
 
 sub bighex {
 	my $hex = shift;
