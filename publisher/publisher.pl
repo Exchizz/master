@@ -224,7 +224,12 @@ PubSub::Util::create_named_pipe($data_pipe_path);
 PubSub::Util::create_named_pipe($metadata_pipe_path);
 
 #=========== Producer start ===========#
-my @command_prod = ($executable_path.$exec, $data_pipe_path, $metadata_pipe_path);
+my @command_prod = ($executable_path.$exec);
+
+
+# Set datapipe and metadatapipe as enviromental parameters
+$ENV{'PUB_DATAPIPE'} = $data_pipe_path;
+$ENV{'PUB_METADATAPIPE'} = $metadata_pipe_path;
 
 # Add additional parameters specified to the producer
 push(@command_prod, @{$producer_parameters});
