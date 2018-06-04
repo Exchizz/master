@@ -67,9 +67,11 @@ my %known_occupied_groups = ();
 my $wait_for_announcements = 5; # seconds
 my $autogen_ip = 1;
 
+my $packet_cnt = 0;
+
 # Generate random integer between 0 and 2^32
 my $rtp_rnd_offset = int(rand(2**32));
-my $rtp_clockrate = 2048; # block size = 4096, each sample is 2 bytes = 2048 samples pr. cunk = pr. packet
+my $rtp_clockrate = 4096; # block size = 4096, each sample is 2 bytes = 2048 samples pr. cunk = pr. packet
 my $rtp_timestamp = $rtp_rnd_offset;
 
 my $snap_time_offset = undef;
@@ -241,22 +243,17 @@ sub callback_5sec{
 };
 
 sub unix_to_ntp {
-#	my $in_unix = shift;
-	my $seconds_fraction = shift;
-  my $unix_epoch = DateTime->from_epoch( epoch => 0 );
+	my $seconds = shift;
+	my $unix_epoch = DateTime->from_epoch( epoch => 0 );
 
-  my $fraction = $seconds-int($seconds);
-  my $ns = $fraction*1e9;
+	my $fraction = $seconds-int($seconds);
+	my $ns = $fraction*1e9;
 
-  my $seconds = int($seconds);
+	my $seconds = int($seconds);
 
+	my $dur_nanoseconds = DateTime::Duration->new( seconds => $seconds, nanoseconds => $ns );
 
-  print "seconds: $seconds, fraction: $fraction, ns: $ns\n";
-
-  my $dur_nanoseconds = DateTime::Duration->new( seconds => $seconds, nanoseconds => $ns );
-
-  $dur_nanoseconds = $unix_epoch + $dur_nanoseconds;
-  print $dur_nanoseconds->datetime."\n";
+	$dur_nanoseconds = $unix_epoch + $dur_nanoseconds;
 
 	my $ntp_epoch = DateTime->new(
 	      year       => 1900,
@@ -267,28 +264,36 @@ sub unix_to_ntp {
 	      second     => 0,
 	  );
 
-#	my $dt = DateTime->from_epoch( epoch => $in_unix );
-
 	my $seconds1 = $ntp_epoch->subtract_datetime_absolute($dur_nanoseconds)->seconds();
 	my $sec_fraction = $ntp_epoch->subtract_datetime_absolute($dur_nanoseconds)->nanoseconds();
-  print "nanoseconds: $sec_fraction\n";
 	my $frac = $sec_fraction*((1<<32) * 1.0e-9 );
 use POSIX;
-	my $diff = ($seconds1<<32) + floor($frac);
+	my $diff = ($seconds1<<32) + ceil($frac);
 	return $diff;
 }
 
+
+my $last_rtp_timestamp = 0;
+my $last_rtcp_sr_timestamp = 0;
 
 sub callback_1sec_sr_send {
 	unless(exists $essential->{'hix'} && exists $essential->{'isp'}) {return};
 
 	my $hix = $essential->{'hix'};
 	my $now_s = $essential->{'now_ns'}/1e9;
+
 	my $snap_isp = $essential->{'isp'};
 	my $rtcp_sr_timestamp = get_64bit_ntp_from_sample($rtp_timestamp, $now_s, $hix, $snap_isp);
 	my $a = unix_to_ntp($rtcp_sr_timestamp);
-	print "Sent rtcp timestamp: $a\n";
 	$rtp_session->raw_rtcp_sr_send($a);
+
+	my $rtp_diff = ($rtp_timestamp-$last_rtp_timestamp)*$snap_isp*1e-9;
+	my $rtcp_diff = $rtcp_sr_timestamp-$last_rtcp_sr_timestamp;
+	print "RTP diff: ".$rtp_diff."\n";
+	print "RTCP diff: ".$rtcp_diff."\n";
+	print "Time error: ".($rtp_diff-$rtcp_diff)."\n";
+	$last_rtp_timestamp = $rtp_timestamp;
+	$last_rtcp_sr_timestamp = $rtcp_sr_timestamp;
 }
 
 
@@ -300,11 +305,12 @@ my $callback_data = sub {
 	}
 
 	if(length($$buffref) > 0){
-		$rtp_session->raw_rtp_send($rtp_timestamp, $$buffref);
+		print "-------------------------------rtp_timestamp: $rtp_timestamp packet cnt. ". $packet_cnt++."\n";
 		$rtp_timestamp += $rtp_clockrate;
-		print "data incomming from data pipe\n" if $verbose > 5;
+		$rtp_session->raw_rtp_send($rtp_timestamp, $$buffref);
 	} else {
 		print "No data from datapipe\n";
+		exit(5);
 	}
 
 	undef $$buffref;
@@ -324,7 +330,7 @@ my $callback_metadata = sub {
 	my $essential_md;
 	my $nonessential_md;
 
-	print "Metadata format: $metadatafmt\n" if $verbose > 2;
+	#print "Metadata format: $metadatafmt\n" if $verbose > 2;
 
 	if($metadatafmt eq "json"){
 		try {
@@ -346,9 +352,9 @@ my $callback_metadata = sub {
 		my $essentialTmp = $data->{'essential'};
 
 		# Merge new essential metadata into existing essential metadata
-		$essential = {%$essentialTmp, %$essential};
+		$essential = {%$essential, %$essentialTmp};
 
-		print Dumper $essential;
+#		print Dumper $essential;
 		if(exists $essential->{'hix'} && exists $essential->{'now_ns'}){
 			print "Hix: ".$essential->{'hix'}." - now_ns:".$essential->{'now_ns'}."\n";
 		}
@@ -421,19 +427,15 @@ sub get_64bit_ntp_from_sample {
 	my ($rtp_time, $now_s, $hix, $snap_isp) = @_;
 	$snap_isp = $snap_isp/1e9;
 	$hix = bighex($hix);
-	print "hix dec: $hix\n";
-	print "snap_time_offset: $snap_time_offset\n";
-	print "rtp_rnd_offset: $rtp_rnd_offset\n";
-	print "rtp_time: $rtp_time\n";
+	print "now_s: $now_s, snap_isp: $snap_isp, rtp_time: $rtp_time, rtp_rnd_offsset: $rtp_rnd_offset, snap_time_offset: $snap_time_offset\n";
 	my $rtcp_time = $now_s + $snap_isp*(($rtp_time - $rtp_rnd_offset) - $hix) + $snap_time_offset;
-	print "RTCP time: $rtcp_time\n";
 	return $rtcp_time;
 }
 
 sub bighex {
 	my $hex = shift;
 
-	print "Param hex: $hex\n";
+#	print "Param hex: $hex\n";
 	my $part = qr/[0-9a-fA-F]{8}/;
 	print "$hex is not a 64-bit hex number\n"
 	  unless my ($high, $low) = $hex =~ /^0x($part)($part)$/;
@@ -446,7 +448,7 @@ sub is_ipv6_taken {
 
 	sub check_wellknown_session {
 		my ($fh, $needle) = @_;
-		print "Callback invoked...\n" if $verbose > 3;
+#		print "Callback invoked...\n" if $verbose > 3;
 		my @ready = IO::Select->new($fh)->can_read(1);
 
 		if(@ready){
@@ -513,7 +515,7 @@ sub announce_stream {
 	# Generate SDP file
 	my $sdp_encoded = $sdp->generate();
 
-	print $sdp_encoded."\n";
+	#print $sdp_encoded."\n";
 	# Send SDP encoded description to Wellknown RTP session
 	$wk_rtp_session->raw_rtp_send(123456, $sdp_encoded);
 }
