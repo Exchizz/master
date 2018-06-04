@@ -21,27 +21,27 @@ use IO::Async::Loop;
 use IO::Async::Timer::Periodic;
 use IO::Async::Stream;
 
-use Storable qw(nfreeze); 
+use Storable qw(nfreeze);
 use IO::Select;
 
 # Test node
 #
 # Author:     Mathias Neerup
 # Created:    2018-09-04
-# Last Edit:  
+# Last Edit:
 #=============== Workflow ===============
 #
 #
 #        init parameters
 #	       |
 #	       v
-#     setup wellknown address 
+#     setup wellknown address
 #              |
 #  	       v
-#   waitfor publishers to register(10 seconds) 
+#   waitfor publishers to register(10 seconds)
 #	       |
 #              v
-# Setup RTP session for HB-data 
+# Setup RTP session for HB-data
 #              |
 #              v
 #         run producer
@@ -76,7 +76,7 @@ my $snap_time_offset = undef;
 
 # Generate random ip(length 4, prepend 0)
 my $rand_ip = sprintf("%04x",int(rand(2**16)));
-my $nonessential = ""; 
+my $nonessential = "";
 my $essential = {};
 my $scope = "ff15";
 my $multicast_addr = "${scope}::1234";
@@ -123,7 +123,7 @@ if ($exec){
 		print "\"$exec\" is readable\n" if $verbose > 0;
 		if(-x $exec){
 			print "\"$exec\" is exeutable\n" if $verbose > 0;
-			
+
 		} else {
 			error("\"$exec\" is not executable\n");
 		}
@@ -168,7 +168,7 @@ if($autogen_ip){
 	while( is_ipv6_taken($fh1, $multicast_addr) ){
 		# Generate random ip(length 4, prepend 0)
 		$rand_ip = sprintf("%04x",int(rand(2**16)));
-	
+
 		$multicast_addr = sprintf("ff15::%s",$rand_ip);
 		print "New random IPv6 multicast ip: $multicast_addr\n";
 	}
@@ -193,24 +193,24 @@ $example_sdp->session_name("My Session");
 $example_sdp->session_info("A fun session");
 $example_sdp->session_uri("http://www.ecs.soton.ac.uk/fun/");
 $example_sdp->session_attribute('tool', "publisher.pl uuid: $pub_uuid");
- 
- 
+
+
 # Add a Time Description
 my $time = $example_sdp->new_time_desc();
 $time->start_time_unix( time() );            # Set start time to now
 $time->end_time_unix( time()+3600 ); # Finishes in one hour
- 
- 
+
+
 # Add an Audio Media Description
 my $audio = $example_sdp->new_media_desc( 'audio' );
 $audio->address($multicast_addr);
 $audio->address_type("IP6");
 $audio->port(5004);
 $audio->attribute('quality', 5);
- 
+
 # Add payload ID 96 with 16-bit, PCM, 22kHz, Mono
 $audio->add_format( 96, 'audio/L16/220500/1' );
- 
+
 # Set the default payload ID to 0
 $audio->default_format_num( 96 );
 @stream_descriptions = ( $example_sdp );
@@ -236,13 +236,27 @@ sub callback_5sec{
 	return unless($nonessential ne "");
 
 	# Pr. custom metadata profile, set markbit to 1
-	$wk_rtp_session->raw_rtp_send(0, $nonessential, 1); 
+	$wk_rtp_session->raw_rtp_send(0, $nonessential, 1);
 	print "Non-essential metadata sent to well known multicast group\n" if $verbose > 2;
 };
 
 sub unix_to_ntp {
-	my $in_unix = shift;
-#	my $epoch = 1527354387;
+#	my $in_unix = shift;
+	my $seconds_fraction = shift;
+  my $unix_epoch = DateTime->from_epoch( epoch => 0 );
+
+  my $fraction = $seconds-int($seconds);
+  my $ns = $fraction*1e9;
+
+  my $seconds = int($seconds);
+
+
+  print "seconds: $seconds, fraction: $fraction, ns: $ns\n";
+
+  my $dur_nanoseconds = DateTime::Duration->new( seconds => $seconds, nanoseconds => $ns );
+
+  $dur_nanoseconds = $unix_epoch + $dur_nanoseconds;
+  print $dur_nanoseconds->datetime."\n";
 
 	my $ntp_epoch = DateTime->new(
 	      year       => 1900,
@@ -251,28 +265,30 @@ sub unix_to_ntp {
 	      hour       => 0,
 	      minute     => 0,
 	      second     => 0,
-	  );  
-	
-	my $dt = DateTime->from_epoch( epoch => $in_unix );
-	
-	my $seconds = $ntp_epoch->subtract_datetime_absolute($dt)->seconds();
-	my $sec_fraction = $ntp_epoch->subtract_datetime_absolute($dt)->nanoseconds();
-	print "fraction:".$sec_fraction."\n";
-	my $diff = $seconds<<32 + 1/$sec_fraction;
-	print "diff: $diff\n";
+	  );
+
+#	my $dt = DateTime->from_epoch( epoch => $in_unix );
+
+	my $seconds1 = $ntp_epoch->subtract_datetime_absolute($dur_nanoseconds)->seconds();
+	my $sec_fraction = $ntp_epoch->subtract_datetime_absolute($dur_nanoseconds)->nanoseconds();
+  print "nanoseconds: $sec_fraction\n";
+	my $frac = $sec_fraction*((1<<32) * 1.0e-9 );
+use POSIX;
+	my $diff = ($seconds1<<32) + floor($frac);
 	return $diff;
 }
+
 
 sub callback_1sec_sr_send {
 	unless(exists $essential->{'hix'} && exists $essential->{'isp'}) {return};
 
-#	my $hix = $essential->{'hix'};
-#	my $now_s = $essential->{'now_ns'}/1e9;
-#	my $snap_isp = $essential->{'isp'};
-#	my $rtcp_sr_timestamp = get_64bit_ntp_from_sample($rtp_timestamp, $now_s, $hix, $snap_isp);
-#	my $a = unix_to_ntp($rtcp_sr_timestamp);
-#	print "Sent rtcp timestamp: $a\n";
-#	$rtp_session->raw_rtcp_sr_send($a);
+	my $hix = $essential->{'hix'};
+	my $now_s = $essential->{'now_ns'}/1e9;
+	my $snap_isp = $essential->{'isp'};
+	my $rtcp_sr_timestamp = get_64bit_ntp_from_sample($rtp_timestamp, $now_s, $hix, $snap_isp);
+	my $a = unix_to_ntp($rtcp_sr_timestamp);
+	print "Sent rtcp timestamp: $a\n";
+	$rtp_session->raw_rtcp_sr_send($a);
 }
 
 
@@ -321,7 +337,7 @@ my $callback_metadata = sub {
 		undef $$buffref;
 		return 0;
 	}
-	
+
 	if($data->{'nonessential'}){
 		$nonessential = nfreeze($data->{'nonessential'});
 	}
@@ -382,7 +398,7 @@ our $loop = IO::Async::Loop->new;
 PubSub::Util::periodic_timer(1, \&callback_1sec);
 PubSub::Util::periodic_timer(5, \&callback_5sec);
 
-# Periodically 
+# Periodically
 PubSub::Util::periodic_timer($sdprate, \&callback_1sec_stream_advertisement);
 PubSub::Util::periodic_timer($sdesrate, \&callback_1_sec_sdes_send);
 PubSub::Util::periodic_timer($srrate, \&callback_1sec_sr_send);
@@ -413,6 +429,7 @@ sub get_64bit_ntp_from_sample {
 	print "RTCP time: $rtcp_time\n";
 	return $rtcp_time;
 }
+
 sub bighex {
 	my $hex = shift;
 
@@ -431,30 +448,30 @@ sub is_ipv6_taken {
 		my ($fh, $needle) = @_;
 		print "Callback invoked...\n" if $verbose > 3;
 		my @ready = IO::Select->new($fh)->can_read(1);
-	
+
 		if(@ready){
 			# This works as we've only added one fh to watch..
 			my ($ready_fd) = @ready;
 			my $bytes_read = sysread($ready_fd, my $buffer,4096);
 			my $packet = new Net::RTP::Packet($buffer);
 		        my $payload = $packet->{'payload'};
-		
+
 			my $sdp = Net::SDP->new($payload);
 			my $media_list = $sdp->media_desc_arrayref();
 		        for my $media (@$media_list){
 				my $multicastaddress = $media->address;
 				my $multicastport = $media->port;
-		
+
 				# We got a conflict
 				print "$multicastaddress vs. $needle\n" if $verbose >3;
 				if($multicastaddress eq $needle){
 					return 1;
 				}
 			}
-		}	
+		}
 		return 0;
 	}
-	
+
 	if(PubSub::Util::waitfor( sub { check_wellknown_session($fh1, $needle) } , $wait_for_announcements, 1.0 )){
 		print "Ipv6 multicast group conflict\n";
 		return 1;
@@ -492,7 +509,7 @@ sub announce_stream {
 	my ($sdp) = @_;
 	# Pack into SDP
 	# Write SDP to wk_rtp_session
-	
+
 	# Generate SDP file
 	my $sdp_encoded = $sdp->generate();
 
@@ -594,4 +611,3 @@ be added to the SDP-file announced by the publisher.
 =over 4
 
 =cut
-
