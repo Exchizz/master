@@ -1,21 +1,14 @@
 #!/bin/bash
 
-# store arguments in a special array 
-args=("$@") 
-# get number of elements 
-ELEMENTS=${#args[@]} 
- 
-# echo each element in array  
-# for loop 
-for (( i=0;i<$ELEMENTS;i++)); do 
-    echo "Param $i:${args[${i}]}"
-done
+# Store arguments in a special array
+MD_PIPE=$SUB_METADATAPIPE;
+DATA_PIPE=$SUB_DATAPIPE;
 
 echo "Starting node consumer"
 echo "Loading stuff consumer";
 while true; do
-	echo "Waiting for data on pipe: $2...";
-	if read line <$2; then
+	echo "Waiting for data on pipe: $MD_PIPE...";
+	if read line <$MD_PIPE; then
 		echo $line | jq . | tee >> /tmp/nonessential
 	else
 		echo "running consumer";

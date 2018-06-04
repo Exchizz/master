@@ -105,7 +105,9 @@ PubSub::Util::create_named_pipe($data_pipe_path);
 PubSub::Util::create_named_pipe($metadata_pipe_path);
 
 #=========== consumer start ===========#
-my @command_prod = ($executable_path, $data_pipe_path, $metadata_pipe_path);
+%ENV{'SUB_DATAPIPE'} = $data_pipe_path;
+%ENV{'SUB_METADATAPIPE'} = $metadata_pipe_path;
+my @command_prod = ($executable_path);
 
 # Add additional parameters specified to the consumer
 push(@command_prod, @{$consumer_parameters});
